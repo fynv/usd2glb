@@ -1,2 +1,5 @@
 # usd2glb
-converting usdc to glb using tinyusdz &amp; tinygltf
+Converting usdc to glb using tinyusdz &amp; tinygltf
+
+Toy code. No formal license. Can be freely used.
+

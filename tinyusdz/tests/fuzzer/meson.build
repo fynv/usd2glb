@@ -1,0 +1,81 @@
+project('fuzz_tinyusdz', 'c', 'cpp', default_options : ['cpp_std=c++14'])
+
+tinyusdz_sources=[
+  '../../src/lz4/lz4.c',
+  '../../src/tinyusdz.cc',
+  '../../src/lz4-compression.cc',
+  '../../src/integerCoding.cpp',
+  '../../src/io-util.cc',
+  '../../src/pprinter.cc',
+  '../../src/performance.cc',
+  '../../src/prim-types.cc',
+  '../../src/prim-reconstruct.cc',
+  '../../src/usdGeom.cc',
+  '../../src/usdShade.cc',
+  '../../src/usdSkel.cc',
+  '../../src/usdLux.cc',
+  '../../src/usdObj.cc',
+  '../../src/primvar.cc',
+  '../../src/ascii-parser.cc',
+  '../../src/usda-reader.cc',
+  '../../src/usda-writer.cc',
+  '../../src/usdc-reader.cc',
+  '../../src/usdc-writer.cc',
+  '../../src/crate-reader.cc',
+  '../../src/crate-format.cc',
+  '../../src/crate-pprint.cc',
+  '../../src/value-types.cc',
+  '../../src/value-pprint.cc',
+  '../../src/image-loader.cc',
+  '../../src/image-writer.cc',
+  '../../src/xform.cc',
+  '../../src/tiny-format.cc',
+  # deps
+  '../../src/external/fpng.cpp',
+  '../../src/external/pystring.cpp',
+  '../../src/external/staticstruct.cc',
+  '../../src/external/tinyxml2/tinyxml2.cpp',
+  #'../../src/external/string_id/string_id.cpp',
+  #'../../src/external/string_id/error.cpp',
+  #'../../src/external/string_id/database.cpp',
+  #'../../src/external/ryu/ryu/d2s.c',
+  #'../../src/external/ryu/ryu/f2s.c',
+  #'../../src/external/ryu/ryu/s2f.c',
+  #'../../src/external/ryu/ryu/s2d.c'
+  ]
+
+#incdirs = include_directories(['../../src','../../src/external/ryu'])
+incdirs = include_directories(['../../src',
+  #'../../src/external/fast_float/include',
+  #'../../src/external/simple_match/include',
+  ])
+
+# TINYUSDZ_FUZZER_BUILD = suppress some debug message
+executable('fuzz_tinyusdz',
+  'tinyusdz_fuzzmain.cc',
+  tinyusdz_sources, 
+  install: true,
+  include_directories : incdirs,
+  cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
+  link_args : '-fsanitize=address,fuzzer' )
+
+executable('fuzz_intcoding',
+  '../../src/lz4/lz4.c',
+  'intCoding_fuzzmain.cc',
+  '../../src/lz4-compression.cc',
+  '../../src/integerCoding.cpp',
+  install: true,
+  include_directories : incdirs,
+  cpp_args : '-fsanitize=address,fuzzer',
+  link_args : '-fsanitize=address,fuzzer' )
+
+
+executable('fuzz_usdaparser',
+  'usdaparser_fuzzmain.cc',
+  tinyusdz_sources, 
+  install: true,
+  include_directories : incdirs,
+  cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
+  link_args : '-fsanitize=address,fuzzer' )
+
+
