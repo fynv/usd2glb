@@ -17,6 +17,9 @@ tinyusdz_sources=[
   '../../src/usdObj.cc',
   '../../src/primvar.cc',
   '../../src/ascii-parser.cc',
+  '../../src/ascii-parser-basetype.cc',
+  '../../src/ascii-parser-timesamples.cc',
+  '../../src/ascii-parser-timesamples-array.cc',
   '../../src/usda-reader.cc',
   '../../src/usda-writer.cc',
   '../../src/usdc-reader.cc',
@@ -29,7 +32,11 @@ tinyusdz_sources=[
   '../../src/image-loader.cc',
   '../../src/image-writer.cc',
   '../../src/xform.cc',
+  '../../src/stage.cc',
   '../../src/tiny-format.cc',
+  '../../src/tydra/render-data.cc',
+  '../../src/tydra/shader-network.cc',
+  '../../src/tydra/scene-access.cc',
   # deps
   '../../src/external/fpng.cpp',
   '../../src/external/pystring.cpp',
@@ -38,13 +45,8 @@ tinyusdz_sources=[
   #'../../src/external/string_id/string_id.cpp',
   #'../../src/external/string_id/error.cpp',
   #'../../src/external/string_id/database.cpp',
-  #'../../src/external/ryu/ryu/d2s.c',
-  #'../../src/external/ryu/ryu/f2s.c',
-  #'../../src/external/ryu/ryu/s2f.c',
-  #'../../src/external/ryu/ryu/s2d.c'
   ]
 
-#incdirs = include_directories(['../../src','../../src/external/ryu'])
 incdirs = include_directories(['../../src',
   #'../../src/external/fast_float/include',
   #'../../src/external/simple_match/include',
@@ -59,14 +61,23 @@ executable('fuzz_tinyusdz',
   cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
   link_args : '-fsanitize=address,fuzzer' )
 
-executable('fuzz_intcoding',
+executable('fuzz_intcoding_decompress',
   '../../src/lz4/lz4.c',
-  'intCoding_fuzzmain.cc',
+  'intCoding_decompress_fuzzmain.cc',
   '../../src/lz4-compression.cc',
   '../../src/integerCoding.cpp',
   install: true,
   include_directories : incdirs,
-  cpp_args : '-fsanitize=address,fuzzer',
+  cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
+  link_args : '-fsanitize=address,fuzzer' )
+
+executable('fuzz_lz4_decompress',
+  '../../src/lz4/lz4.c',
+  'lz4_decompress_fuzzmain.cc',
+  '../../src/lz4-compression.cc',
+  install: true,
+  include_directories : incdirs,
+  cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
   link_args : '-fsanitize=address,fuzzer' )
 
 
@@ -78,4 +89,41 @@ executable('fuzz_usdaparser',
   cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
   link_args : '-fsanitize=address,fuzzer' )
 
+executable('fuzz_usdcparser',
+  'usdcparser_fuzzmain.cc',
+  tinyusdz_sources, 
+  install: true,
+  include_directories : incdirs,
+  cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
+  link_args : '-fsanitize=address,fuzzer' )
 
+executable('fuzz_dr_mp3_decoding',
+  'dr_mp3_decoding_fuzzmain.cc',
+  install: true,
+  include_directories : incdirs,
+  cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
+  link_args : '-fsanitize=address,fuzzer' )
+
+executable('fuzz_dr_wav_decoding',
+  'dr_wav_decoding_fuzzmain.cc',
+  install: true,
+  include_directories : incdirs,
+  cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
+  link_args : '-fsanitize=address,fuzzer' )
+
+executable('fuzz_alac_decoding',
+  'alac_decoding_fuzzmain.cc',
+  '../../src/external/alac/codec/EndianPortable.c',
+  '../../src/external/alac/codec/ALACBitUtilities.c',
+  '../../src/external/alac/codec/ALACDecoder.cpp',
+  '../../src/external/alac/codec/ALACEncoder.cpp',
+  '../../src/external/alac/codec/ag_dec.c',
+  '../../src/external/alac/codec/ag_enc.c',
+  '../../src/external/alac/codec/dp_dec.c',
+  '../../src/external/alac/codec/dp_enc.c',
+  '../../src/external/alac/codec/matrix_dec.c',
+  '../../src/external/alac/codec/matrix_enc.c',
+  install: true,
+  include_directories : incdirs,
+  cpp_args : ['-fsanitize=address,fuzzer', '-DTINYUSDZ_FUZZER_BUILD=1'],
+  link_args : '-fsanitize=address,fuzzer' )

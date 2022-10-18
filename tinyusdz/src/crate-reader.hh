@@ -9,6 +9,7 @@
 #include "nonstd/optional.hpp"
 //
 #include "crate-format.hh"
+#include "prim-types.hh"
 #include "stream-reader.hh"
 
 namespace tinyusdz {
@@ -36,7 +37,12 @@ struct CrateReaderConfig {
   size_t maxTokenLength = 4096; // Maximum allowed length of `token` string
   size_t maxStringLength = 1024*1024*64;
 
-  // Total memory budget for uncompressed USD data(vertices, `tokens`, ...)` in bytes.
+  size_t maxVariantsMapElements = 128;
+
+  // Generic int[] data
+  size_t maxInts = 1024*1024*4;
+
+  // Total memory budget for uncompressed USD data(vertices, `tokens`, ...)` in [bytes].
   size_t maxMemoryBudget = std::numeric_limits<int32_t>::max(); // Default 2GB
 };
 
@@ -63,11 +69,16 @@ class CrateReader {
 
     ///
     /// child_name is used when reconstructing scene graph.
+    /// Return false when `child_name` is already added to a children.
     ///
-    void AddChildren(const std::string &child_name, size_t node_index) {
-      assert(_primChildren.count(child_name) == 0);
+    bool AddChildren(const std::string &child_name, size_t node_index) {
+      if (_primChildren.count(child_name)) {
+        return false;
+      }
+      //assert(_primChildren.count(child_name) == 0);
       _primChildren.emplace(child_name);
       _children.push_back(node_index);
+      return true;
     }
 
     ///
@@ -260,6 +271,18 @@ class CrateReader {
   //                                  PrimAttrib *attr,
   //                                  const std::string &prop_name);
 
+  bool VersionGreaterThanOrEqualTo_0_8_0() const {
+    if (_version[0] > 0) {
+      return true;
+    }
+
+    if (_version[1] >= 8) {
+      return true;
+    }
+
+    return false;
+  }
+
  private:
 
 
@@ -293,6 +316,11 @@ class CrateReader {
 
   bool ReadPathArray(std::vector<Path> *d);
   bool ReadStringArray(std::vector<std::string> *d);
+  bool ReadLayerOffsetArray(std::vector<LayerOffset> *d);
+
+  bool ReadReference(Reference *d);
+  bool ReadPayload(Payload *d);
+  bool ReadLayerOffset(LayerOffset *d);
 
   // customData(Dictionary)
   bool ReadCustomData(CustomDataType *d);
@@ -307,14 +335,38 @@ class CrateReader {
   bool ReadFloatArray(bool is_compressed, std::vector<float> *d);
   bool ReadDoubleArray(bool is_compressed, std::vector<double> *d);
 
+  //template <class T>
+  //struct IsIntType {
+  //  static const bool value =
+  //    std::is_same<T, int32_t>::value ||
+  //    std::is_same<T, uint32_t>::value ||
+  //    std::is_same<T, int64_t>::value ||
+  //    std::is_same<T, uint64_t>::value;
+  //};
+
+  template<typename T>
+  bool ReadArray(std::vector<T> *d);
+
+  //template <typename T,
+  //typename std::enable_if<IsIntType<T>::value, bool>::type>
+  //bool ReadArray(std::vector<T> *d);
+
+
+  template<typename T>
+  bool ReadListOp(ListOp<T> *d);
+
   // TODO: Templatize
   bool ReadPathListOp(ListOp<Path> *d);
   bool ReadTokenListOp(ListOp<value::token> *d);
   bool ReadStringListOp(ListOp<std::string> *d);
-  bool ReadIntListOp(ListOp<int32_t> *d);
-  bool ReadUIntListOp(ListOp<uint32_t> *d);
-  bool ReadInt64ListOp(ListOp<int64_t> *d);
-  bool ReadUInt64ListOp(ListOp<uint64_t> *d);
+  //bool ReadIntListOp(ListOp<int32_t> *d);
+  //bool ReadUIntListOp(ListOp<uint32_t> *d);
+  //bool ReadInt64ListOp(ListOp<int64_t> *d);
+  //bool ReadUInt64ListOp(ListOp<uint64_t> *d);
+  //bool ReadReferenceListOp(ListOp<Reference> *d);
+  //bool ReadPayloadListOp(ListOp<Payload> *d);
+
+  bool ReadVariantSelectionMap(VariantSelectionMap *d);
 
   // Read 64bit uint with range check
   bool ReadNum(uint64_t &n, uint64_t maxnum);
@@ -350,8 +402,6 @@ class CrateReader {
   std::map<crate::Index, FieldValuePairVector>
       _live_fieldsets;  // <fieldset index, List of field with unpacked Values>
 
-  // class Impl;
-  // Impl *_impl;
 
   const StreamReader *_sr{};
 
@@ -368,6 +418,9 @@ class CrateReader {
 
   // Approximated uncompressed memory usage(vertices, `tokens`, ...) in bytes. 
   uint64_t _memoryUsage{0};
+
+  class Impl;
+  Impl *_impl;
 };
 
 }  // namespace crate

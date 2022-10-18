@@ -31,8 +31,6 @@
 #include <cassert>
 #include <cmath>
 
-#define kPI (3.14159265358979323846)
-
 namespace OpenSubdiv {
 namespace OPENSUBDIV_VERSION {
 
@@ -279,9 +277,11 @@ Scheme<SCHEME_CATMARK>::assignSmoothLimitMask(VERTEX const& vertex, MASK& posMas
         posMask.FaceWeight(2) = fWeight;
         posMask.FaceWeight(3) = fWeight;
     } else {
-        Weight fWeight = 1.0f / (Weight)(valence * (valence + 5.0f));
+        Weight Valence = (Weight) valence;
+
+        Weight fWeight = 1.0f / (Valence * (Valence + 5.0f));
         Weight eWeight = 4.0f * fWeight;
-        Weight vWeight = (Weight)(1.0f - valence * (eWeight + fWeight));
+        Weight vWeight = 1.0f - Valence * (eWeight + fWeight);
 
         posMask.VertexWeight(0) = vWeight;
         for (int i = 0; i < valence; ++i) {
@@ -333,6 +333,8 @@ template <typename VERTEX, typename MASK>
 inline void
 Scheme<SCHEME_CATMARK>::assignCreaseLimitTangentMasks(VERTEX const& vertex,
         MASK& tan1Mask, MASK& tan2Mask, int const creaseEnds[2]) const {
+
+    constexpr auto kPI = 3.14159265358979323846;
 
     typedef typename MASK::Weight Weight;
 
@@ -453,6 +455,7 @@ inline void
 Scheme<SCHEME_CATMARK>::assignSmoothLimitTangentMasks(VERTEX const& vertex,
         MASK& tan1Mask, MASK& tan2Mask) const {
 
+    constexpr auto kPI = 3.14159265358979323846;
     typedef typename MASK::Weight Weight;
 
     int valence = vertex.GetNumFaces();

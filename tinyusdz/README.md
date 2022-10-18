@@ -26,9 +26,28 @@ Remaining task is to write a examples, demo and scene/render delegate(Tydra)
 * [ ] Web demo with Three.js?
   * [ ] Three.js started to support USDZ with Ascii format, but no USDC support yet: https://github.com/mrdoob/three.js/issues/14219
 
-### Web platform and sandboxed environment
+### Security and memory budget
+
+TinyUSDZ has first priority of considering security and stability.
+
+USDZ(USDC) is a binary format and data are compressed. To avoid out-of-bounds access, out-of-memory, and other security issues when loading malcious USDZ(e.g. USDZ file from unknown origin), TinyUSDZ has a memory budget feature to avoid out-of-memory issue.
+
+To limit a memory usage when loading USDZ file, Please set a value `max_memory_limit_in_mb` in USDLoadOptions.
+
+TinyUSDZ source codes(and some external third party codes) are also checked by Address Sanitizer, CodeQL and Fuzzer.
+
+#### Fuzzer 
+
+See [tests/fuzzer](tests/fuzzer) .
+For building fuzzer tests, you'll need Meson and Ninja.
+
+If you need to deal with arbitrary USD files from unknown origin(e.g. from internet, NFT storage. Whose may contain malcious data), it is recommended to use TinyUSDZ in sandboxed environment(RunC, FlatPak, WASI(WASM)). Run in WASI is recommended at the moment(please see next section).
+
+#### Web platform(WASM) and sandboxed environment(WASI)
 
 TinyUSDZ does not use C++ exceptions and can be built without threads. TinyUSDZ supports WASM and WASI build. So TinyUSDZ should runs well on various Web platform(WebAssembly. No SharedArrayBuffer, Atomics and WebAssembly SIMD(which is not yet available on iOS Safari) required) and sandboxed environment(WASI. Users who need to read various USD file which possibly could contain malcious data from Internet, IPFS or blockchain storage). 
+
+See [sandbox/wasi/](sandbox/wasi) for Building TinyUSDZ with WASI toolchain.
 
 ### Tydra
 
@@ -41,6 +60,7 @@ Tydra may be something like Tiny version of pxrUSD Hydra, but its API is complet
   * Linear
   * Rec.709
   * [ ] Partial support of OCIO(OpenColor IO) through TinyColorIO https://github.com/syoyo/tinycolorio . Currently SPI3DLut only.
+* More details are T.B.W.
 
 ## Notice
 
@@ -83,32 +103,22 @@ If you need commercial support, eco-system development(e.g. plug-ins, DCC tools 
 ## Requirements
 
 * C++14 compiler
-  * [x] gcc 5 or later
+  * [x] gcc 4.9 or later
   * [x] Visual Studio 2019 or later(2017 may compiles)
     * [x] Can be compiled with standalone MSVC compilers(Build Tools for Visual Studio 2019)
   * [x] clang 3.4 or later https://clang.llvm.org/cxx_status.html
   * [x] llvm-mingw(clang) supported
-
-## USDZ file format
-
-USDZ is actually the uncompressed zip file.
-USDZ(ZIP) contains usdc(binary) and resources(e.g. image/auduo files)
-
-## Security and memory budget
-
-USDZ(USDC) is a binary format and data are compressed. To avoid out-of-bounds access, out-of-memory, and other security issues when loading malcious USDZ(e.g. USDZ file from unknown origin), TinyUSDZ has a memory budget feature to avoid out-of-memory issue.
-
-To limit a memory usage when loading USDZ file, Please set a value `max_memory_limit_in_mb` in USDLoadOptions.
-
-TinyUSDZ source codes are also checked by Address Sanitizer, CodeQL and Fuzzer.
-
-If you need to deal with arbitrary USD files from unknown origin(e.g. from internet, NFT storage. Whose may contain malcious data), it is recommended to use TinyUSDZ in sandboxed environment(RunC, FlatPak, WASI(WASM)). Run in WASI is recommended at the moment. See [sandbox/wasi/](sandbox/wasi) for Building TinyUSDZ with WASI toolchain.
+  * [x] MinGW gcc supported, but not recommended(You may got compilation failure depending on your build configuration: https://github.com/syoyo/tinyusdz/issues/33 , and linking takes too much time if you use default bfd linker.). If you want to compile TinyUSDZ in MinGW environment, llvm-mingw(clang) is recommended to use.
 
 ## Build
 
 ### Integrate to your app
 
-Recomended way is simply copy `src` and `include` folder to your app, and add `*.cc` files to your app's build system.
+If you are using CMake, just include tinyusdz repo with `add_subdirectory`. 
+
+Another way is simply copy `src` folder to your app, and add `*.cc` files to your app's build system.
+All include paths are set relative from `src` folder, so you can just add include directory to `src` folder.
+
 See `<tinyusdz>/CMakeLists.txt` and [examples/sdlviewer/CMakeLists.txt](examples/sdlviewer/CMakeLists.txt) for details.
 
 It may not be recommend to use tinyusdz as a git submodule, since the repo contains lots of codes required to build TinyUSDZ examples but these are not required for your app.
@@ -119,9 +129,9 @@ Please see `CMake build options` and `CMakeLists.txt`. In most case same identif
 
 ### CMake
 
-cmake build is still provided for CI build. `CMakeSettings.json` is provided for Visual Studio 2019.
+Cmake build is provided.
 
-Cmake project is not recommended for embedding TinyUSDZ to your app.
+#### Linux and macOS
 
 ```
 $ mkdir build
@@ -129,6 +139,15 @@ $ cd build
 $ cmake ..
 $ make
 ```
+
+Please take a look at `scripts/bootstrap-cmake-*.sh` for some build configuraions.
+
+#### Visual Studio
+
+Visual Studio 2019 and 2022 are supported.
+
+`CMakeSettings.json` is provided for Visual Studio 2019, but reccommended way is to invoke `vcsetup.bat`.
+(Edit VS version in `vcsetup.bat` as you with)
 
 #### LLVM-MinGW build
 
@@ -163,15 +182,12 @@ Edit path to MSVC SDK and Windows SDK in `bootstrap-clang-cl-win64.bat`, then
 > ninja.exe
 ```
 
-### Fuzzer 
-
-See [tests/fuzzer](tests/fuzzer) .
-For building fuzzer tests, you'll need Meson and Ninja.
 
 ### Examples
 
-* [usda_parser](xamples/usda_parser/) Parse USDA and print it as Ascii.
-* [Simple usdz_dump](examples/simple_usdz_dump/) Parse USDC and print it as Ascii.
+* [usda_parser](examples/usda_parser/) Parse USDA and print it as Ascii.
+* [usdc_parser](examples/usdc_parser/) Parse USDC and print it as Ascii.
+* [Simple usdz_dump](examples/simple_usdz_dump/) Parse USDZ/USDA/USDC and print it as Ascii.
 * [Simple SDL viewer](examples/sdlviewer/)
   * Separated CMake build provided: See [Readme](examples/sdlviewer/README.md)
 
@@ -216,10 +232,11 @@ mkdir -p ~/.config/blender/2.93/scripts/addons/modules
 
 * [ ] Built-in usdObj(wavefront .obj mesh) support.
   * Through tinyobjloader.
-* [ ] Support Crate(binary) version 0.8.0(USD v20.11 default)
-* [ ] Animation
-  * [ ] Skinning(usdSkel)
+* [x] Support Crate(binary) version 0.8.0(USD v20.11 default)
+* [ ] usdSkel utilities
+  * [ ] Joint hierachy reconstruction and compute skinning matrix(usdSkel)
   * [ ] Blend shapes
+    * [x] Basic Blendshapes support
     * [ ] In-between blend shapes
 * [ ] Read USD data with bounded memory size. This feature is especially useful for mobile platform(e.g. in terms of security, memory consumption, etc)
 * [ ] USDC writer
@@ -227,6 +244,11 @@ mkdir -p ~/.config/blender/2.93/scripts/addons/modules
 * [ ] UDIM texture support
 * [ ] MaterialX support
   * Parse XML file
+
+### Middle priority
+
+* [ ] Composition arcs
+* [ ] Code optimization
 
 ### Lower priority
 
@@ -236,7 +258,7 @@ mkdir -p ~/.config/blender/2.93/scripts/addons/modules
   * [ ] Play audio using SoLoud or miniaudio(or Oboe for Android)
   * [ ] wav(dr_wav)
   * [ ] mp3(dr_mp3)
-  * [ ] m4a?
+  * [ ] m4a(ALAC?)
 * [ ] Viewer with Vulkan API.
 * [ ] Replace OpenSubdiv with our own subdiv library.
 * [ ] Write parser based on the schema definition.
@@ -272,7 +294,8 @@ then build TinyUSDZ by linking with this local Python build.
 
 ## License
 
-TinyUSDZ is licensed under MIT license.
+TinyUSDZ is licensed under MIT license and Apache 2.0 license.
+(Doing relicensing from MIT to Apache 2.0. Will be fully relicensed to Apache 2.0 at some point)
 
 ### Third party licenses
 
@@ -300,7 +323,6 @@ TinyUSDZ is licensed under MIT license.
 * fast_float: Apache 2.0/MIT dual license. https://github.com/fastfloat/fast_float
 * jsteeman/atoi: Apache 2.0 license. https://github.com/jsteemann/atoi
 * formatxx: unlicense. https://github.com/seanmiddleditch/formatxx
-* mapbox/variant: BSD-3 or BSL-1.0 license. https://github.com/mapbox/variant
 * ubench.h: Unlicense. https://github.com/sheredom/ubench.h
 * thelink2012/any : BSL-1.0 license. https://github.com/thelink2012/any
 * simple_match : BSL-1.0 license. https://github.com/jbandela/simple_match
@@ -314,3 +336,4 @@ TinyUSDZ is licensed under MIT license.
 * bvh: MIT license. https://github.com/madmann91/bvh
 * dtoa_milo.h: MIT License. https://github.com/miloyip/dtoa-benchmark
 * jeaiii/itoa: MIT License. https://github.com/jeaiii/itoa
+* alac: Apache 2.0 License. https://macosforge.github.io/alac/

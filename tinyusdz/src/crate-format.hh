@@ -168,8 +168,10 @@ struct Field {
 struct Spec {
   Index path_index;
   Index fieldset_index;
-  SpecType spec_type;
+  SpecType spec_type; // Must be 32bit
 };
+
+static_assert(sizeof(Spec) == (4 * 3), "sizeof(Spec) must be 12");
 
 struct Section {
   Section() { memset(this, 0, sizeof(*this)); }
@@ -441,6 +443,8 @@ class CrateValue {
   // vector<double> is defined in SET_TYPE_LIST(SET_TYPE_1D)
   //SET_TYPE_SCALAR(std::vector<double>)
   SET_TYPE_SCALAR(std::vector<LayerOffset>)
+  SET_TYPE_SCALAR(Payload)
+  SET_TYPE_SCALAR(VariantSelectionMap)
 
   SET_TYPE_SCALAR(value::TimeSamples)
   SET_TYPE_SCALAR(CustomDataType) // for (type-restricted) dist

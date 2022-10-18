@@ -72,6 +72,16 @@ namespace crate {
   } while(0)
 
 
+#if 0
+//
+// Impl(TODO)
+//
+class CrateReader::Impl
+{
+ public:
+  Impl();
+};
+#endif
 
 //
 // --
@@ -96,9 +106,14 @@ CrateReader::CrateReader(StreamReader *sr, const CrateReaderConfig &config) : _s
   _config.numThreads = (std::min)(1024, _config.numThreads);
 #endif
 
+  //_impl = new Impl();
+
 }
 
-CrateReader::~CrateReader() {}
+CrateReader::~CrateReader() {
+  //delete _impl;
+  //_impl = nullptr;
+}
 
 std::string CrateReader::GetError() { return _err; }
 
@@ -194,7 +209,6 @@ bool CrateReader::ReadIndex(crate::Index *i) {
 }
 
 bool CrateReader::ReadIndices(std::vector<crate::Index> *indices) {
-  // TODO(syoyo): Error check
   uint64_t n;
   if (!_sr->read8(&n)) {
     return false;
@@ -204,9 +218,17 @@ bool CrateReader::ReadIndices(std::vector<crate::Index> *indices) {
     PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many indices.");
   }
 
+  if (n == 0) {
+    return true;
+  }
+
   DCOUT("ReadIndices: n = " << n);
 
   size_t datalen = size_t(n) * sizeof(crate::Index);
+
+  if (datalen > _sr->size()) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Indices data exceeds USDC size.");
+  }
 
   CHECK_MEMORY_USAGE(datalen);
 
@@ -276,14 +298,18 @@ bool CrateReader::ReadValueRep(crate::ValueRep *rep) {
 
 template <class Int>
 bool CrateReader::ReadCompressedInts(Int *out,
-                                      size_t size) {
+                                     size_t num_ints) {
+  if (num_ints > _config.maxInts) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "# of ints too large.");
+  }
+
   using Compressor =
       typename std::conditional<sizeof(Int) == 4, Usd_IntegerCompression,
                                 Usd_IntegerCompression64>::type;
 
 
-
-  size_t compBufferSize = Compressor::GetCompressedBufferSize(size);
+  // TODO: Read compressed data from _sr directly
+  size_t compBufferSize = Compressor::GetCompressedBufferSize(num_ints);
   CHECK_MEMORY_USAGE(compBufferSize);
 
   uint64_t compSize;
@@ -291,18 +317,30 @@ bool CrateReader::ReadCompressedInts(Int *out,
     return false;
   }
 
-  if ((compSize > _sr->size()) || (compSize > _config.maxMemoryBudget)) {
+  if (compSize > compBufferSize) {
+    // Truncate
+    // TODO: return error?
+    compSize = compBufferSize;
+  }
+
+  if (compSize > _sr->size()) {
     return false;
   }
 
-  std::vector<char> compBuffer(compBufferSize);
+  if (compSize < 4) {
+    // Too small
+    return false;
+  }
+
+  std::vector<char> compBuffer;
+  compBuffer.resize(compBufferSize);
   if (!_sr->read(size_t(compSize), size_t(compSize),
                 reinterpret_cast<uint8_t *>(compBuffer.data()))) {
     PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read compressedInts.");
   }
 
   bool ret = Compressor::DecompressFromBuffer(
-      compBuffer.data(), size_t(compSize), out, size, &_err);
+      compBuffer.data(), size_t(compSize), out, num_ints, &_err);
 
   REDUCE_MEMORY_USAGE(compBufferSize);
 
@@ -431,7 +469,8 @@ bool CrateReader::ReadHalfArray(bool is_compressed,
 
     if (code == 'i') {
       // Compressed integers.
-      std::vector<int32_t> ints(length);
+      std::vector<int32_t> ints;
+      ints.resize(length);
       if (!ReadCompressedInts(ints.data(), ints.size())) {
         _err += "Failed to read compressed ints in ReadHalfArray.\n";
         return false;
@@ -449,14 +488,16 @@ bool CrateReader::ReadHalfArray(bool is_compressed,
         return false;
       }
 
-      std::vector<value::half> lut(lutSize);
+      std::vector<value::half> lut;
+      lut.resize(lutSize);
       if (!_sr->read(sizeof(value::half) * lutSize, sizeof(value::half) * lutSize,
                      reinterpret_cast<uint8_t *>(lut.data()))) {
         _err += "Failed to read lut table in ReadHalfArray.\n";
         return false;
       }
 
-      std::vector<uint32_t> indexes(length);
+      std::vector<uint32_t> indexes;
+      indexes.resize(length);
       if (!ReadCompressedInts(indexes.data(), indexes.size())) {
         _err += "Failed to read lut indices in ReadHalfArray.\n";
         return false;
@@ -541,7 +582,8 @@ bool CrateReader::ReadFloatArray(bool is_compressed, std::vector<float> *d) {
 
     if (code == 'i') {
       // Compressed integers.
-      std::vector<int32_t> ints(length);
+      std::vector<int32_t> ints;
+      ints.resize(length);
       if (!ReadCompressedInts(ints.data(), ints.size())) {
         _err += "Failed to read compressed ints in ReadFloatArray.\n";
         return false;
@@ -555,14 +597,16 @@ bool CrateReader::ReadFloatArray(bool is_compressed, std::vector<float> *d) {
         return false;
       }
 
-      std::vector<float> lut(lutSize);
+      std::vector<float> lut;
+      lut.resize(lutSize);
       if (!_sr->read(sizeof(float) * lutSize, sizeof(float) * lutSize,
                      reinterpret_cast<uint8_t *>(lut.data()))) {
         _err += "Failed to read lut table in ReadFloatArray.\n";
         return false;
       }
 
-      std::vector<uint32_t> indexes(length);
+      std::vector<uint32_t> indexes;
+      indexes.resize(length);
       if (!ReadCompressedInts(indexes.data(), indexes.size())) {
         _err += "Failed to read lut indices in ReadFloatArray.\n";
         return false;
@@ -649,7 +693,8 @@ bool CrateReader::ReadDoubleArray(bool is_compressed, std::vector<double> *d) {
 
     if (code == 'i') {
       // Compressed integers.
-      std::vector<int32_t> ints(length);
+      std::vector<int32_t> ints;
+      ints.resize(length);
       if (!ReadCompressedInts(ints.data(), ints.size())) {
         _err += "Failed to read compressed ints in ReadDoubleArray.\n";
         return false;
@@ -663,14 +708,16 @@ bool CrateReader::ReadDoubleArray(bool is_compressed, std::vector<double> *d) {
         return false;
       }
 
-      std::vector<double> lut(lutSize);
+      std::vector<double> lut;
+      lut.resize(lutSize);
       if (!_sr->read(sizeof(double) * lutSize, sizeof(double) * lutSize,
                      reinterpret_cast<uint8_t *>(lut.data()))) {
         _err += "Failed to read lut table in ReadDoubleArray.\n";
         return false;
       }
 
-      std::vector<uint32_t> indexes(length);
+      std::vector<uint32_t> indexes;
+      indexes.resize(length);
       if (!ReadCompressedInts(indexes.data(), indexes.size())) {
         _err += "Failed to read lut indices in ReadDoubleArray.\n";
         return false;
@@ -728,6 +775,17 @@ bool CrateReader::ReadTimeSamples(value::TimeSamples *d) {
 
   // Save offset
   auto values_offset = _sr->tell();
+
+  // TODO: Enable Check if  type `double[]`
+#if 0
+  if (times_rep.GetType() == crate::CrateDataTypeId::CRATE_DATA_TYPE_DOUBLE_VECTOR) {
+    // ok
+  } else if ((times_rep.GetType() == crate::CrateDataTypeId::CRATE_DATA_TYPE_DOUBOLE) && times_rep.IsArray()) {
+    // ok
+  } else {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("`times` value must be type `double[]`, but got type `{}`", times_rep.GetTypeName()));
+  }
+#endif
 
   crate::CrateValue times_value;
   if (!UnpackValueRep(times_rep, &times_value)) {
@@ -825,7 +883,7 @@ bool CrateReader::ReadStringArray(std::vector<std::string> *d) {
 
     if (n > _config.maxArrayElements) {
       PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many array elements.");
-    } 
+    }
 
     CHECK_MEMORY_USAGE(size_t(n) * sizeof(crate::Index));
 
@@ -864,6 +922,131 @@ bool CrateReader::ReadStringArray(std::vector<std::string> *d) {
   return true;
 }
 
+bool CrateReader::ReadReference(Reference *d) {
+
+  if (!d) {
+    return false;
+  }
+
+  // assetPath : string
+  // primPath : Path
+  // layerOffset : LayerOffset
+  // customData : Dict
+
+  std::string assetPath;
+  if (!ReadString(&assetPath)) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read assetPath in Reference ValueRep.");
+  }
+
+  crate::PathIndex index;
+  if (!ReadIndex(&index)) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read primPath Index in Reference ValueRep.");
+  }
+
+  auto path = GetPath(index);
+  if (!path) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Invalid Path index in Reference ValueRep.");
+  }
+
+  LayerOffset layerOffset;
+  if (!ReadLayerOffset(&layerOffset)) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read LayerOffset in Reference ValueRep.");
+  }
+
+  CustomDataType customData;
+  if (!ReadCustomData(&customData)) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read CustomData(Dict) in Reference ValueRep.");
+  }
+
+  d->asset_path = assetPath;
+  d->prim_path = path.value();
+  d->layerOffset = layerOffset;
+  d->customData = customData;
+
+  return true;
+}
+
+bool CrateReader::ReadPayload(Payload *d) {
+
+  if (!d) {
+    return false;
+  }
+
+  // assetPath : string
+  // primPath : Path
+
+  std::string assetPath;
+  if (!ReadString(&assetPath)) {
+    return false;
+  }
+
+
+  crate::PathIndex index;
+  if (!ReadIndex(&index)) {
+    return false;
+  }
+
+  auto path = GetPath(index);
+  if (!path) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Invalid Path index in Payload ValueRep.");
+  }
+
+  // LayerOffset from 0.8.0
+  if (VersionGreaterThanOrEqualTo_0_8_0()) {
+    LayerOffset layerOffset;
+    if (!ReadLayerOffset(&layerOffset)) {
+      return false;
+    }
+    d->_layer_offset = layerOffset;
+  }
+
+  d->asset_path = assetPath;
+  d->_prim_path = path.value();
+
+  return true;
+}
+
+bool CrateReader::ReadLayerOffset(LayerOffset *d) {
+  static_assert(sizeof(LayerOffset) == 8 * 2, "LayerOffset must be 16bytes");
+
+  // double x 2
+  if (!_sr->read(sizeof(double), sizeof(double), reinterpret_cast<uint8_t *>(&(d->_offset)))) {
+    return false;
+  }
+  if (!_sr->read(sizeof(double), sizeof(double), reinterpret_cast<uint8_t *>(&(d->_scale)))) {
+    return false;
+  }
+
+  return true;
+}
+
+bool CrateReader::ReadLayerOffsetArray(std::vector<LayerOffset> *d) {
+  // array data is not compressed
+
+  uint64_t n;
+  if (!_sr->read8(&n)) {
+    PUSH_ERROR("Failed to read # of elements.");
+    return false;
+  }
+
+  if (n > _config.maxArrayElements) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many array elements.");
+  }
+
+  CHECK_MEMORY_USAGE(size_t(n) * sizeof(LayerOffset));
+
+  d->resize(size_t(n));
+
+  if (!_sr->read(size_t(n) * sizeof(LayerOffset),
+                 size_t(n) * sizeof(LayerOffset),
+                 reinterpret_cast<uint8_t *>(d->data()))) {
+    PUSH_ERROR("Failed to read LayerOffset[] data.");
+    return false;
+  }
+
+  return true;
+}
+
 bool CrateReader::ReadPathArray(std::vector<Path> *d) {
   // array data is not compressed
   auto ReadFn = [this](std::vector<Path> &result) -> bool {
@@ -876,7 +1059,7 @@ bool CrateReader::ReadPathArray(std::vector<Path> *d) {
     if (n > _config.maxArrayElements) {
       _err += "Too many Path array elements.\n";
       return false;
-    } 
+    }
 
     CHECK_MEMORY_USAGE(size_t(n) * sizeof(crate::Index));
 
@@ -937,7 +1120,7 @@ bool CrateReader::ReadTokenListOp(ListOp<value::token> *d) {
     if (n > _config.maxArrayElements) {
       _err += "Too many ListOp elements.\n";
       return false;
-    } 
+    }
 
     CHECK_MEMORY_USAGE(size_t(n) * sizeof(crate::Index));
 
@@ -1049,7 +1232,7 @@ bool CrateReader::ReadStringListOp(ListOp<std::string> *d) {
     if (n > _config.maxArrayElements) {
       _err += "Too many ListOp elements.\n";
       return false;
-    } 
+    }
 
     CHECK_MEMORY_USAGE(size_t(n) * sizeof(crate::Index));
 
@@ -1161,7 +1344,7 @@ bool CrateReader::ReadPathListOp(ListOp<Path> *d) {
     if (n > _config.maxArrayElements) {
       _err += "Too many ListOp elements.\n";
       return false;
-    } 
+    }
 
     CHECK_MEMORY_USAGE(size_t(n) * sizeof(crate::Index));
 
@@ -1246,6 +1429,419 @@ bool CrateReader::ReadPathListOp(ListOp<Path> *d) {
     }
 
     d->SetOrderedItems(items);
+  }
+
+  return true;
+}
+
+template<>
+bool CrateReader::ReadArray(std::vector<Reference> *d) {
+
+  if (!d) {
+    return false;
+  }
+
+  uint64_t n;
+  if (!_sr->read8(&n)) {
+    return false;
+  }
+
+  if (n > _config.maxArrayElements) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many array elements.");
+  }
+
+  CHECK_MEMORY_USAGE(sizeof(Reference) * n);
+
+  for (size_t i = 0; i < n; i++) {
+    Reference p;
+    if (!ReadReference(&p)) {
+      return false;
+    }
+    d->emplace_back(p);
+  }
+
+  return true;
+}
+
+template<>
+bool CrateReader::ReadArray(std::vector<Payload> *d) {
+
+  if (!d) {
+    return false;
+  }
+
+  uint64_t n;
+  if (!_sr->read8(&n)) {
+    return false;
+  }
+
+  if (n > _config.maxArrayElements) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many array elements.");
+  }
+
+  CHECK_MEMORY_USAGE(sizeof(Payload) * n);
+
+  for (size_t i = 0; i < n; i++) {
+    Payload p;
+    if (!ReadPayload(&p)) {
+      return false;
+    }
+    d->emplace_back(p);
+  }
+
+  return true;
+}
+
+// T = int, uint, int64, uint64
+template<typename T>
+//typename std::enable_if<CrateReader::IsIntType<T>::value, bool>::type
+bool CrateReader::ReadArray(std::vector<T> *d) {
+
+  if (!d) {
+    return false;
+  }
+
+  uint64_t n;
+  if (!_sr->read8(&n)) {
+    return false;
+  }
+
+  if (n > _config.maxArrayElements) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many array elements.");
+  }
+
+  if (n == 0) {
+    return true;
+  }
+
+  CHECK_MEMORY_USAGE(sizeof(T) * size_t(n));
+
+  d->resize(size_t(n));
+  if (_sr->read(sizeof(T) * n, sizeof(T) * size_t(n), reinterpret_cast<uint8_t *>(d->data()))) {
+    return false;
+  }
+
+  return true;
+}
+
+template<typename T>
+bool CrateReader::ReadListOp(ListOp<T> *d) {
+  // read ListOpHeader
+  ListOpHeader h;
+  if (!_sr->read1(&h.bits)) {
+    PUSH_ERROR("Failed to read ListOpHeader.");
+    return false;
+  }
+
+  if (h.IsExplicit()) {
+    d->ClearAndMakeExplicit();
+  }
+
+  //
+  // NOTE: array data is not compressed even for Int type
+  //
+
+  if (h.HasExplicitItems()) {
+    std::vector<T> items;
+    if (!ReadArray(&items)) {
+      _err += "Failed to read ListOp::ExplicitItems.\n";
+      return false;
+    }
+
+    d->SetExplicitItems(items);
+  }
+
+  if (h.HasAddedItems()) {
+    std::vector<T> items;
+    if (!ReadArray(&items)) {
+      _err += "Failed to read ListOp::AddedItems.\n";
+      return false;
+    }
+
+    d->SetAddedItems(items);
+  }
+
+  if (h.HasPrependedItems()) {
+    std::vector<T> items;
+    if (!ReadArray(&items)) {
+      _err += "Failed to read ListOp::PrependedItems.\n";
+      return false;
+    }
+
+    d->SetPrependedItems(items);
+  }
+
+  if (h.HasAppendedItems()) {
+    std::vector<T> items;
+    if (!ReadArray(&items)) {
+      _err += "Failed to read ListOp::AppendedItems.\n";
+      return false;
+    }
+
+    d->SetAppendedItems(items);
+  }
+
+  if (h.HasDeletedItems()) {
+    std::vector<T> items;
+    if (!ReadArray(&items)) {
+      _err += "Failed to read ListOp::DeletedItems.\n";
+      return false;
+    }
+
+    d->SetDeletedItems(items);
+  }
+
+  if (h.HasOrderedItems()) {
+    std::vector<T> items;
+    if (!ReadArray(&items)) {
+      _err += "Failed to read ListOp::OrderedItems.\n";
+      return false;
+    }
+
+    d->SetOrderedItems(items);
+  }
+
+  return true;
+}
+
+#if 0
+bool CrateReader::ReadReferenceListOp(ListOp<Reference> *d) {
+  // read ListOpHeader
+  ListOpHeader h;
+  if (!_sr->read1(&h.bits)) {
+    PUSH_ERROR("Failed to read ListOpHeader.");
+    return false;
+  }
+
+  if (h.IsExplicit()) {
+    d->ClearAndMakeExplicit();
+  }
+
+  // array data is not compressed
+  auto ReadFn = [this](std::vector<Reference> &result) -> bool {
+    uint64_t n;
+    if (!_sr->read8(&n)) {
+      PUSH_ERROR("Failed to read # of elements in ListOp.");
+      return false;
+    }
+
+    if (n > _config.maxArrayElements) {
+      _err += "Too many ListOp elements.\n";
+      return false;
+    }
+
+    CHECK_MEMORY_USAGE(size_t(n) * sizeof(Reference));
+
+    for (size_t i = 0; i < size_t(n); i++) {
+      Reference p;
+      if (!ReadReference(&p)) {
+        return false;
+      }
+      result.emplace_back(p);
+    }
+
+    return true;
+  };
+
+  if (h.HasExplicitItems()) {
+    std::vector<Reference> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::ExplicitItems.\n";
+      return false;
+    }
+
+    d->SetExplicitItems(items);
+  }
+
+  if (h.HasAddedItems()) {
+    std::vector<Reference> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::AddedItems.\n";
+      return false;
+    }
+
+    d->SetAddedItems(items);
+  }
+
+  if (h.HasPrependedItems()) {
+    std::vector<Reference> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::PrependedItems.\n";
+      return false;
+    }
+
+    d->SetPrependedItems(items);
+  }
+
+  if (h.HasAppendedItems()) {
+    std::vector<Reference> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::AppendedItems.\n";
+      return false;
+    }
+
+    d->SetAppendedItems(items);
+  }
+
+  if (h.HasDeletedItems()) {
+    std::vector<Reference> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::DeletedItems.\n";
+      return false;
+    }
+
+    d->SetDeletedItems(items);
+  }
+
+  if (h.HasOrderedItems()) {
+    std::vector<Reference> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::OrderedItems.\n";
+      return false;
+    }
+
+    d->SetOrderedItems(items);
+  }
+
+  return true;
+}
+
+bool CrateReader::ReadPayloadListOp(ListOp<Payload> *d) {
+  // read ListOpHeader
+  ListOpHeader h;
+  if (!_sr->read1(&h.bits)) {
+    PUSH_ERROR("Failed to read ListOpHeader.");
+    return false;
+  }
+
+  if (h.IsExplicit()) {
+    d->ClearAndMakeExplicit();
+  }
+
+  // array data is not compressed
+  auto ReadFn = [this](std::vector<Payload> &result) -> bool {
+    uint64_t n;
+    if (!_sr->read8(&n)) {
+      PUSH_ERROR("Failed to read # of elements in ListOp.");
+      return false;
+    }
+
+    if (n > _config.maxArrayElements) {
+      _err += "Too many ListOp elements.\n";
+      return false;
+    }
+
+    CHECK_MEMORY_USAGE(size_t(n) * sizeof(Payload));
+
+    for (size_t i = 0; i < size_t(n); i++) {
+      Payload p;
+      if (!ReadPayload(&p)) {
+        return false;
+      }
+      result.emplace_back(p);
+    }
+
+    return true;
+  };
+
+  if (h.HasExplicitItems()) {
+    std::vector<Payload> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::ExplicitItems.\n";
+      return false;
+    }
+
+    d->SetExplicitItems(items);
+  }
+
+  if (h.HasAddedItems()) {
+    std::vector<Payload> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::AddedItems.\n";
+      return false;
+    }
+
+    d->SetAddedItems(items);
+  }
+
+  if (h.HasPrependedItems()) {
+    std::vector<Payload> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::PrependedItems.\n";
+      return false;
+    }
+
+    d->SetPrependedItems(items);
+  }
+
+  if (h.HasAppendedItems()) {
+    std::vector<Payload> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::AppendedItems.\n";
+      return false;
+    }
+
+    d->SetAppendedItems(items);
+  }
+
+  if (h.HasDeletedItems()) {
+    std::vector<Payload> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::DeletedItems.\n";
+      return false;
+    }
+
+    d->SetDeletedItems(items);
+  }
+
+  if (h.HasOrderedItems()) {
+    std::vector<Payload> items;
+    if (!ReadFn(items)) {
+      _err += "Failed to read ListOp::OrderedItems.\n";
+      return false;
+    }
+
+    d->SetOrderedItems(items);
+  }
+
+  return true;
+}
+#endif
+
+bool CrateReader::ReadVariantSelectionMap(VariantSelectionMap *d) {
+
+  if (!d) {
+    return false;
+  }
+
+  // map<string, string>
+
+  // n
+  // [key, value] * n
+
+  uint64_t sz;
+  if (!_sr->read8(&sz)) {
+    _err += "Failed to read the number of elements for VariantsMap data.\n";
+    return false;
+  }
+
+  if (sz > _config.maxVariantsMapElements) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "The number of elements for VariantsMap data is too large. Max = " << std::to_string(_config.maxVariantsMapElements) << ", but got " << std::to_string(sz));
+  }
+
+  for (size_t i = 0; i < sz; i++) {
+    std::string key;
+    if (!ReadString(&key)) {
+      return false;
+    }
+
+    std::string value;
+    if (!ReadString(&value)) {
+      return false;
+    }
+
+    // TODO: Duplicate key check?
+    d->emplace(key, value);
   }
 
   return true;
@@ -1715,19 +2311,25 @@ bool CrateReader::UnpackInlinedValueRep(const crate::ValueRep &rep,
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_INT_LIST_OP:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_INT64_LIST_OP:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_UINT_LIST_OP:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_UINT64_LIST_OP:
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_UINT64_LIST_OP: {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("ListOp data type `{}` cannot be inlined.",
+          crate::GetCrateDataTypeName(dty.dtype_id)));
+    }
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_PATH_VECTOR:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_TOKEN_VECTOR:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_VARIANT_SELECTION_MAP:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_TIME_SAMPLES:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_PAYLOAD:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_DOUBLE_VECTOR:
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_PAYLOAD:
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_PAYLOAD_LIST_OP:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_LAYER_OFFSET_VECTOR:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_STRING_VECTOR:
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_STRING_VECTOR: {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Data type `{}` cannot be inlined.",
+          crate::GetCrateDataTypeName(dty.dtype_id)));
+    }
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_VALUE:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_UNREGISTERED_VALUE:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_UNREGISTERED_VALUE_LIST_OP:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_PAYLOAD_LIST_OP:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_TIME_CODE: {
       PUSH_ERROR(
           "Invalid data type(or maybe not supported in TinyUSDZ yet) for "
@@ -2163,9 +2765,9 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::matrix2d));
-      
+
 
         std::vector<value::matrix2d> v(static_cast<size_t>(n));
         if (!_sr->read(size_t(n) * sizeof(value::matrix2d),
@@ -2209,7 +2811,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::matrix3d));
 
         std::vector<value::matrix3d> v(static_cast<size_t>(n));
@@ -2255,7 +2857,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::matrix4d));
 
         std::vector<value::matrix4d> v(static_cast<size_t>(n));
@@ -2298,7 +2900,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::quatd));
 
         std::vector<value::quatd> v(static_cast<size_t>(n));
@@ -2342,7 +2944,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::quatf));
 
         std::vector<value::quatf> v(static_cast<size_t>(n));
@@ -2386,7 +2988,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::quath));
 
         std::vector<value::quath> v(static_cast<size_t>(n));
@@ -2432,7 +3034,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::double2));
 
         std::vector<value::double2> v(static_cast<size_t>(n));
@@ -2476,7 +3078,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::float2));
 
         std::vector<value::float2> v(static_cast<size_t>(n));
@@ -2520,7 +3122,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::half2));
 
         std::vector<value::half2> v(static_cast<size_t>(n));
@@ -2563,7 +3165,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::int2));
 
         std::vector<value::int2> v(static_cast<size_t>(n));
@@ -2606,7 +3208,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::double3));
 
         std::vector<value::double3> v(static_cast<size_t>(n));
@@ -2649,7 +3251,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::float3));
 
         std::vector<value::float3> v(static_cast<size_t>(n));
@@ -2693,7 +3295,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::half3));
 
         std::vector<value::half3> v(static_cast<size_t>(n));
@@ -2736,7 +3338,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::int3));
 
         std::vector<value::int3> v(static_cast<size_t>(n));
@@ -2779,7 +3381,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::double4));
 
         std::vector<value::double4> v(static_cast<size_t>(n));
@@ -2822,7 +3424,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::float4));
 
         std::vector<value::float4> v(static_cast<size_t>(n));
@@ -2865,7 +3467,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::half4));
 
         std::vector<value::half4> v(static_cast<size_t>(n));
@@ -2908,7 +3510,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
         if (n > _config.maxArrayElements) {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
         }
-        
+
         CHECK_MEMORY_USAGE(n * sizeof(value::int4));
 
         std::vector<value::int4> v(static_cast<size_t>(n));
@@ -3021,7 +3623,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
       if (n > _config.maxArrayElements) {
         PUSH_ERROR_AND_RETURN_TAG(kTag, "Array size too large.");
       }
-      
+
       CHECK_MEMORY_USAGE(n * sizeof(crate::Index));
 
       std::vector<crate::Index> indices(static_cast<size_t>(n));
@@ -3079,8 +3681,7 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
 
       std::vector<std::string> v;
       if (!ReadStringArray(&v)) {
-        _err += "Failed to read StringVector value\n";
-        return false;
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read StringVector value");
       }
 
       DCOUT("StringArray = " << v);
@@ -3090,26 +3691,127 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
       return true;
     }
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_VARIANT_SELECTION_MAP: {
-      // TODO
-      PUSH_WARN("VariantSelectionMap is not yet supported. Skipping...");
+      COMPRESS_UNSUPPORTED_CHECK(dty)
+
+      VariantSelectionMap m;
+      if (!ReadVariantSelectionMap(&m)) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read VariantSelectionMap value");
+      }
+
+      DCOUT("VariantSelectionMap = " << print_variantSelectionMap(m, 0));
+
+      value->Set(m);
+
       return true;
     }
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_REFERENCE_LIST_OP:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_INT_LIST_OP:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_INT64_LIST_OP:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_UINT_LIST_OP:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_UINT64_LIST_OP:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_PAYLOAD:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_LAYER_OFFSET_VECTOR:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_VALUE_BLOCK:
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_LAYER_OFFSET_VECTOR: {
+      COMPRESS_UNSUPPORTED_CHECK(dty)
+      // LayerOffset[]
+
+      std::vector<LayerOffset> v;
+      if (!ReadLayerOffsetArray(&v)) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read LayerOffsetVector value");
+      }
+
+      DCOUT("LayerOffsetVector = " << v);
+
+      value->Set(v);
+
+      return true;
+
+    }
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_PAYLOAD: {
+      COMPRESS_UNSUPPORTED_CHECK(dty)
+
+      // Payload
+      Payload v;
+      if (!ReadPayload(&v)) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read Payload value");
+      }
+
+      DCOUT("Payload = " << v);
+
+      value->Set(v);
+      return true;
+    }
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_PAYLOAD_LIST_OP: {
+      ListOp<Payload> lst;
+
+      if (!ReadListOp(&lst)) {
+        PUSH_ERROR("Failed to read PayloadListOp data");
+        return false;
+      }
+
+      value->Set(lst);
+      return true;
+    }
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_REFERENCE_LIST_OP: {
+      ListOp<Reference> lst;
+
+      if (!ReadListOp(&lst)) {
+        PUSH_ERROR("Failed to read ReferenceListOp data");
+        return false;
+      }
+
+      value->Set(lst);
+      return true;
+    }
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_INT_LIST_OP: {
+      ListOp<int32_t> lst;
+
+      if (!ReadListOp(&lst)) {
+        PUSH_ERROR("Failed to read IntListOp data");
+        return false;
+      }
+
+      value->Set(lst);
+      return true;
+    }
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_INT64_LIST_OP: {
+      ListOp<int64_t> lst;
+
+      if (!ReadListOp(&lst)) {
+        PUSH_ERROR("Failed to read Int64ListOp data");
+        return false;
+      }
+
+      value->Set(lst);
+      return true;
+    }
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_UINT_LIST_OP: {
+      ListOp<uint32_t> lst;
+
+      if (!ReadListOp(&lst)) {
+        PUSH_ERROR("Failed to read UIntListOp data");
+        return false;
+      }
+
+      value->Set(lst);
+      return true;
+    }
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_UINT64_LIST_OP: {
+      ListOp<uint64_t> lst;
+
+      if (!ReadListOp(&lst)) {
+        PUSH_ERROR("Failed to read UInt64ListOp data");
+        return false;
+      }
+
+      value->Set(lst);
+      return true;
+    }
+    case crate::CrateDataTypeId::CRATE_DATA_TYPE_VALUE_BLOCK: {
+      PUSH_ERROR(
+          "ValueBlock must be defined in Inlined ValueRep.");
+      return false;
+    }
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_VALUE:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_UNREGISTERED_VALUE:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_UNREGISTERED_VALUE_LIST_OP:
-    case crate::CrateDataTypeId::CRATE_DATA_TYPE_PAYLOAD_LIST_OP:
     case crate::CrateDataTypeId::CRATE_DATA_TYPE_TIME_CODE: {
       PUSH_ERROR(
           "Invalid data type(or maybe not supported in TinyUSDZ yet) for "
-          "Inlined value: " +
+          "Uninlined value: " +
           crate::GetCrateDataTypeName(dty.dtype_id));
       return false;
     }
@@ -3135,15 +3837,33 @@ bool CrateReader::BuildDecompressedPathsImpl(
       // Assume single root node in the scene.
       DCOUT("paths[" << pathIndexes[thisIndex]
                      << "] is parent. name = " << parentPath.full_path_name());
-      parentPath = Path::RootPath();
+      parentPath = Path::make_root_path();
+
+      if (thisIndex >= pathIndexes.size()) {
+        PUSH_ERROR("Index exceeds pathIndexes.size()");
+        return false;
+      }
+
+      size_t idx = pathIndexes[thisIndex];
+      if (idx >= _paths.size()) {
+        PUSH_ERROR("Index is out-of-range");
+        return false;
+      }
+
       _paths[pathIndexes[thisIndex]] = parentPath;
     } else {
-      int32_t tokenIndex = elementTokenIndexes[thisIndex];
-      bool isPrimPropertyPath = tokenIndex < 0;
-      tokenIndex = std::abs(tokenIndex);
+      if (thisIndex >= elementTokenIndexes.size()) {
+        PUSH_ERROR("Index exceeds elementTokenIndexes.size()");
+        return false;
+      }
+      int32_t _tokenIndex = elementTokenIndexes[thisIndex];
+      DCOUT("elementTokenIndex = " << _tokenIndex);
+      bool isPrimPropertyPath = _tokenIndex < 0;
+      // ~0 returns -2147483648, so cast to uint32
+      uint32_t tokenIndex = uint32_t(isPrimPropertyPath ? -_tokenIndex : _tokenIndex);
 
-      DCOUT("tokenIndex = " << tokenIndex);
-      if (tokenIndex >= int32_t(_tokens.size())) {
+      DCOUT("tokenIndex = " << tokenIndex << ", _tokens.size = " << _tokens.size());
+      if (tokenIndex >= _tokens.size()) {
         PUSH_ERROR("Invalid tokenIndex in BuildDecompressedPathsImpl.");
         return false;
       }
@@ -3151,13 +3871,24 @@ bool CrateReader::BuildDecompressedPathsImpl(
       DCOUT("elemToken = " << elemToken);
       DCOUT("[" << pathIndexes[thisIndex] << "].append = " << elemToken);
 
+      size_t idx = pathIndexes[thisIndex];
+      if (idx >= _paths.size()) {
+        PUSH_ERROR("Index is out-of-range");
+        return false;
+      }
+
+      if (idx >= _elemPaths.size()) {
+        PUSH_ERROR("Index is out-of-range");
+        return false;
+      }
+
       // full path
-      _paths[pathIndexes[thisIndex]] =
+      _paths[idx] =
           isPrimPropertyPath ? parentPath.AppendProperty(elemToken.str())
                              : parentPath.AppendElement(elemToken.str());
 
       // also set leaf path for 'primChildren' check
-      _elemPaths[pathIndexes[thisIndex]] = Path(elemToken.str(), "");
+      _elemPaths[idx] = Path(elemToken.str(), "");
       //_paths[pathIndexes[thisIndex]].SetLocalPart(elemToken.str());
     }
 
@@ -3165,6 +3896,11 @@ bool CrateReader::BuildDecompressedPathsImpl(
     // continue to the neighbor.  If we have both then spawn a task for the
     // sibling and do the child ourself.  We think that our path trees tend
     // to be broader more often than deep.
+
+    if (thisIndex >= jumps.size()) {
+      PUSH_ERROR("Index is out-of-range");
+      return false;
+    }
 
     hasChild = (jumps[thisIndex] > 0) || (jumps[thisIndex] == -1);
     hasSibling = (jumps[thisIndex] >= 0);
@@ -3178,8 +3914,15 @@ bool CrateReader::BuildDecompressedPathsImpl(
           return false;
         }
       }
+
+      size_t idx = pathIndexes[thisIndex];
+      if (idx >= _paths.size()) {
+        PUSH_ERROR("Index is out-of-range");
+        return false;
+      }
+
       // Have a child (may have also had a sibling). Reset parent path.
-      parentPath = _paths[pathIndexes[thisIndex]];
+      parentPath = _paths[idx];
     }
     // If we had only a sibling, we just continue since the parent path is
     // unchanged and the next thing in the reader stream is the sibling's
@@ -3205,33 +3948,90 @@ bool CrateReader::BuildNodeHierarchy(
     if (parentNodeIndex == -1) {
       // root node.
       // Assume single root node in the scene.
-      assert(thisIndex == 0);
+      //assert(thisIndex == 0);
+      if (thisIndex != 0) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "TODO: Multiple root nodes.");
+      }
 
-      Node root(parentNodeIndex, _paths[pathIndexes[thisIndex]]);
+      if (thisIndex >= pathIndexes.size()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "Index out-of-range.");
+      }
 
-      _nodes[pathIndexes[thisIndex]] = root;
+      size_t pathIdx = pathIndexes[thisIndex];
+      if (pathIdx >= _paths.size()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "PathIndex out-of-range.");
+      }
+
+      if (pathIdx >= _nodes.size()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "PathIndex out-of-range.");
+      }
+
+      Node root(parentNodeIndex, _paths[pathIdx]);
+
+      _nodes[pathIdx] = root;
 
       parentNodeIndex = int64_t(thisIndex);
 
     } else {
       if (parentNodeIndex >= int64_t(_nodes.size())) {
-        return false;
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "Parent Index out-of-range.");
+      }
+
+      if (parentNodeIndex >= int64_t(pathIndexes.size())) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "Parent Index out-of-range.");
+      }
+
+      if (thisIndex >= pathIndexes.size()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "Index out-of-range.");
       }
 
       DCOUT("Hierarchy. parent[" << pathIndexes[size_t(parentNodeIndex)]
                                  << "].add_child = " << pathIndexes[thisIndex]);
 
-      Node node(parentNodeIndex, _paths[pathIndexes[thisIndex]]);
+      size_t pathIdx = pathIndexes[thisIndex];
+      if (pathIdx >= _paths.size()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "PathIndex out-of-range.");
+      }
 
-      assert(_nodes[size_t(pathIndexes[thisIndex])].GetParent() == -2);
+      if (pathIdx >= _nodes.size()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "PathIndex out-of-range.");
+      }
 
-      _nodes[size_t(pathIndexes[thisIndex])] = node;
+      Node node(parentNodeIndex, _paths[pathIdx]);
+
+      // Ensure parent is not set yet.
+      if (_nodes[pathIdx].GetParent() != -2) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "???: Maybe corrupted path hierarchy?.");
+      }
+
+      _nodes[pathIdx] = node;
+
+      if (pathIdx >= _elemPaths.size()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "PathIndex out-of-range.");
+      }
 
       //std::string name = _paths[pathIndexes[thisIndex]].local_path_name();
-      std::string name = _elemPaths[pathIndexes[thisIndex]].full_path_name();
+      std::string name = _elemPaths[pathIdx].full_path_name();
       DCOUT("childName = " << name);
-      _nodes[size_t(pathIndexes[size_t(parentNodeIndex)])].AddChildren(
-          name, pathIndexes[thisIndex]);
+
+      size_t parentNodeIdx = size_t(parentNodeIndex);
+      if (parentNodeIdx >= pathIndexes.size()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "ParentNodeIdx out-of-range.");
+      }
+
+      size_t parentPathIdx = pathIndexes[parentNodeIdx];
+      if (parentPathIdx >= _nodes.size()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "PathIndex out-of-range.");
+      }
+
+      if (!_nodes[parentPathIdx].AddChildren(
+          name, pathIdx)) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, "Invalid path index.");
+      }
+    }
+
+    if (thisIndex >= jumps.size()) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, "Index is out-of-range");
     }
 
     hasChild = (jumps[thisIndex] > 0) || (jumps[thisIndex] == -1);
@@ -3398,15 +4198,26 @@ bool CrateReader::ReadCompressedPaths(const uint64_t maxNumPaths) {
 
 #ifdef TINYUSDZ_LOCAL_DEBUG_PRINT
   for (size_t i = 0; i < pathIndexes.size(); i++) {
-    std::cout << "pathIndexes[" << i << "] = " << pathIndexes[i] << "\n";
+    DCOUT("pathIndexes[" << i << "] = " << pathIndexes[i]);
   }
 
-  for (auto item : elementTokenIndexes) {
-    std::cout << "elementTokenIndexes " << item << "\n";
+  for (size_t i = 0; i < elementTokenIndexes.size(); i++) {
+    std::stringstream ss;
+    ss << "elementTokenIndexes[" << i << "] = " << elementTokenIndexes[i];
+    int32_t tokIdx = elementTokenIndexes[i];
+    if (tokIdx < 0) {
+      // Property Path. Need to negate it.
+      tokIdx = -tokIdx;
+    }
+    if (auto tokv = GetToken(crate::Index(uint32_t(tokIdx)))) {
+      ss << "(" << tokv.value() << ")";
+    }
+    ss << "\n";
+    DCOUT(ss.str());
   }
 
-  for (auto item : jumps) {
-    std::cout << "jumps " << item << "\n";
+  for (size_t i = 0; i < jumps.size(); i++) {
+    DCOUT(fmt::format("jumps[{}] = {}", i, jumps[i]));
   }
 #endif
 
@@ -3441,7 +4252,7 @@ bool CrateReader::ReadSection(crate::Section *s) {
   }
 
   if (size_t(s->start) > _sr->size()) {
-    PUSH_ERROR_AND_RETURN_TAG(kTag, "Section start offset exceeds USDC file size."); 
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Section start offset exceeds USDC file size.");
   }
 
   if (!_sr->read8(&s->size)) {
@@ -3450,7 +4261,7 @@ bool CrateReader::ReadSection(crate::Section *s) {
   }
 
   if (size_t(s->start + s->size) > _sr->size()) {
-    PUSH_ERROR_AND_RETURN_TAG(kTag, "Section end offset exceeds USDC file size."); 
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Section end offset exceeds USDC file size.");
   }
 
 
@@ -3459,30 +4270,37 @@ bool CrateReader::ReadSection(crate::Section *s) {
 
 bool CrateReader::ReadTokens() {
   if ((_tokens_index < 0) || (_tokens_index >= int64_t(_toc.sections.size()))) {
-    _err += "Invalid index for `TOKENS` section.\n";
-    return false;
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Invalid index for `TOKENS` section.");
   }
 
   if ((_version[0] == 0) && (_version[1] < 4)) {
-    _err += "Version must be 0.4.0 or later, but got " +
-            std::to_string(_version[0]) + "." + std::to_string(_version[1]) +
-            "." + std::to_string(_version[2]) + "\n";
-    return false;
+    PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Version must be 0.4.0 or later, but got {}.{}.{}",
+      _version[0], _version[1], _version[2]));
   }
 
   const crate::Section &sec = _toc.sections[size_t(_tokens_index)];
   if (!_sr->seek_set(uint64_t(sec.start))) {
-    _err += "Failed to move to `TOKENS` section.\n";
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to move to `TOKENS` section.");
     return false;
   }
 
+  if (sec.size < 4) {
+     PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("`TOKENS` section data size is zero or too small."));
+  }
+
   DCOUT("sec.start = " << sec.start);
+  DCOUT("sec.size = " << sec.size);
 
   // # of tokens.
   uint64_t n;
   if (!_sr->read8(&n)) {
-    _err += "Failed to read # of tokens at `TOKENS` section.\n";
-    return false;
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read # of tokens at `TOKENS` section.");
+  }
+
+  DCOUT("# of tokens = " << n);
+
+  if (n == 0) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Empty tokens.");
   }
 
   if (n > _config.maxNumTokens) {
@@ -3494,36 +4312,68 @@ bool CrateReader::ReadTokens() {
   // Compressed token data.
   uint64_t uncompressedSize;
   if (!_sr->read8(&uncompressedSize)) {
-    _err += "Failed to read uncompressedSize at `TOKENS` section.\n";
-    return false;
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read uncompressedSize at `TOKENS` section.");
+  }
+
+  DCOUT("uncompressedSize = " << uncompressedSize);
+
+
+  // 3 = ';-)'
+  // consider '\0' delimiter
+  if ((3 + n) > uncompressedSize) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "`TOKENS` section corrupted.");
+  }
+
+  // At least min size should be 16 both for compress and uncompress.
+
+  if (uncompressedSize < 4) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "uncompressedSize too small or zero bytes.");
   }
 
   // TODO uncompressdSize check.
+  if (uncompressedSize > _sr->size()) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "uncompressedSize exceeds input USDC size.");
+  }
 
   uint64_t compressedSize;
   if (!_sr->read8(&compressedSize)) {
-    _err += "Failed to read compressedSize at `TOKENS` section.\n";
-    return false;
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read compressedSize at `TOKENS` section.");
+  }
 
+  DCOUT("compressedSize = " << compressedSize);
+
+  if (compressedSize < 4) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "compressedSize is too small or zero bytes.");
   }
 
   if (compressedSize > _sr->size()) {
     PUSH_ERROR_AND_RETURN_TAG(kTag, "Compressed data size exceeds input file size.");
   }
 
-  CHECK_MEMORY_USAGE(compressedSize);
+  if (size_t(compressedSize) > size_t(sec.size)) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Compressed data size exceeds `TOKENS` section size.");
+  }
+
+  // To combat with heap-buffer flow in lz4 cuased by corrupted lz4 compressed data,
+  // We allocate same size of uncompressedSize(or larger one),
+  // And further, extra 128 bytes for safety(LZ4_FAST_DEC_LOOP does 16 bytes stride memcpy)
+
+  uint64_t bufSize = (std::max)(compressedSize, uncompressedSize);
+  CHECK_MEMORY_USAGE(bufSize+128);
   CHECK_MEMORY_USAGE(uncompressedSize);
 
-  DCOUT("# of tokens = " << n << ", uncompressedSize = " << uncompressedSize
-                         << ", compressedSize = " << compressedSize);
 
+  // dst
   std::vector<char> chars(static_cast<size_t>(uncompressedSize));
-  std::vector<char> compressed(static_cast<size_t>(compressedSize));
+  memset(chars.data(), 0, chars.size());
+
+  std::vector<char> compressed(static_cast<size_t>(bufSize + 128));
+  memset(compressed.data(), 0, compressed.size());
 
   if (compressedSize !=
       _sr->read(size_t(compressedSize), size_t(compressedSize),
                 reinterpret_cast<uint8_t *>(compressed.data()))) {
-    _err += "Failed to read compressed data at `TOKENS` section.\n";
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read compressed data at `TOKENS` section.");
     return false;
   }
 
@@ -3531,8 +4381,7 @@ bool CrateReader::ReadTokens() {
       LZ4Compression::DecompressFromBuffer(compressed.data(), chars.data(),
                                            size_t(compressedSize),
                                            size_t(uncompressedSize), &_err)) {
-    _err += "Failed to decompress data of Tokens.\n";
-    return false;
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to decompress data of Tokens.");
   }
 
   // Split null terminated string into _tokens.
@@ -3572,7 +4421,6 @@ bool CrateReader::ReadTokens() {
 
     p += len + 1;  // +1 = '\0'
     n_remain = size_t(pe - p);
-    //assert(p <= pe);
     if (p > pe) {
       _err += "Invalid token string array.\n";
       return false;
@@ -3596,11 +4444,17 @@ bool CrateReader::ReadStrings() {
 
   const crate::Section &s = _toc.sections[size_t(_strings_index)];
 
+  if (s.size == 0) {
+    // empty `STRINGS`?
+    return true;
+  }
+
   if (!_sr->seek_set(uint64_t(s.start))) {
     _err += "Failed to move to `STRINGS` section.\n";
     return false;
   }
 
+  // `STRINGS` are not compressed.
   if (!ReadIndices(&_string_indices)) {
     _err += "Failed to read StringIndex array.\n";
     return false;
@@ -3628,6 +4482,11 @@ bool CrateReader::ReadFields() {
 
   const crate::Section &s = _toc.sections[size_t(_fields_index)];
 
+  if (s.size == 0) {
+    // accepts Empty FIELDS size.
+    return true;
+  }
+
   if (!_sr->seek_set(uint64_t(s.start))) {
     _err += "Failed to move to `FIELDS` section.\n";
     return false;
@@ -3639,85 +4498,94 @@ bool CrateReader::ReadFields() {
     return false;
   }
 
-  if (num_fields > _config.maxNumFields) {
-    PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many fields in `FIELDS` section."); 
+  DCOUT("num_fields = " << num_fields);
+
+  if (num_fields == 0) {
+    // Fields may be empty, so OK
+    return true;
   }
 
+  if (num_fields > _config.maxNumFields) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many fields in `FIELDS` section.");
+  }
+
+  if (sizeof(void *) == 4) {
+    // 32bit
+    if (num_fields > std::numeric_limits<int32_t>::max() / sizeof(uint32_t)) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many fields in `FIELDS` section.");
+    }
+  }
+
+  CHECK_MEMORY_USAGE(size_t(num_fields) * sizeof(Field));
 
   _fields.resize(static_cast<size_t>(num_fields));
 
   // indices
   {
-    std::vector<char> comp_buffer(
-        Usd_IntegerCompression::GetCompressedBufferSize(
-            static_cast<size_t>(num_fields)));
-    // temp buffer for decompress
+
+    CHECK_MEMORY_USAGE(size_t(num_fields) * sizeof(uint32_t));
+
     std::vector<uint32_t> tmp;
-    tmp.resize(static_cast<size_t>(num_fields));
-
-    uint64_t fields_size;
-    if (!_sr->read8(&fields_size)) {
-      _err += "Failed to read field legnth at `FIELDS` section.\n";
-      return false;
-    }
-
-    if (fields_size !=
-        _sr->read(size_t(fields_size), size_t(fields_size),
-                  reinterpret_cast<uint8_t *>(comp_buffer.data()))) {
-      _err += "Failed to read field data at `FIELDS` section.\n";
-      return false;
-    }
-
-    std::string err;
-    DCOUT("fields_size = " << fields_size << ", tmp.size = " << tmp.size()
-                           << ", num_fields = " << num_fields);
-    Usd_IntegerCompression::DecompressFromBuffer(
-        comp_buffer.data(), size_t(fields_size), tmp.data(), size_t(num_fields),
-        &err);
-
-    if (!err.empty()) {
-      _err += err;
-      return false;
+    tmp.resize(size_t(num_fields));
+    if (!ReadCompressedInts(tmp.data(), size_t(num_fields))) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read Field token_index array.");
     }
 
     for (size_t i = 0; i < num_fields; i++) {
       _fields[i].token_index.value = tmp[i];
     }
+
+    REDUCE_MEMORY_USAGE(size_t(num_fields) * sizeof(uint32_t));
+
   }
 
-  // Value reps
+  // Value reps(LZ4 compressed)
   {
-    uint64_t reps_size;
+    uint64_t reps_size; // compressed size
     if (!_sr->read8(&reps_size)) {
-      _err += "Failed to read reps legnth at `FIELDS` section.\n";
-      return false;
+      PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read value reps legnth at `FIELDS` section.");
     }
 
+    if (reps_size > size_t(s.size)) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, "Invalid byte size of Value reps data.");
+    }
+
+    if (reps_size > _sr->size()) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, "Compressed Value reps size exceeds USDC data.");
+    }
+
+    CHECK_MEMORY_USAGE(size_t(reps_size));
+
+    // TODO: Decompress from _sr directly.
     std::vector<char> comp_buffer(static_cast<size_t>(reps_size));
 
     if (reps_size !=
         _sr->read(size_t(reps_size), size_t(reps_size),
                   reinterpret_cast<uint8_t *>(comp_buffer.data()))) {
-      _err += "Failed to read reps data at `FIELDS` section.\n";
-      return false;
+      PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read reps data at `FIELDS` section.");
     }
 
     // reps datasize = LZ4 compressed. uncompressed size = num_fields * 8 bytes
+    size_t uncompressed_size = size_t(num_fields) * sizeof(uint64_t);
+    CHECK_MEMORY_USAGE(uncompressed_size);
+
     std::vector<uint64_t> reps_data;
     reps_data.resize(static_cast<size_t>(num_fields));
 
-    size_t uncompressed_size = size_t(num_fields) * sizeof(uint64_t);
 
     if (uncompressed_size != LZ4Compression::DecompressFromBuffer(
                                  comp_buffer.data(),
                                  reinterpret_cast<char *>(reps_data.data()),
                                  size_t(reps_size), uncompressed_size, &_err)) {
-      return false;
+      PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read Fields ValueRep data.");
     }
 
     for (size_t i = 0; i < num_fields; i++) {
       _fields[i].value_rep = crate::ValueRep(reps_data[i]);
     }
+
+    REDUCE_MEMORY_USAGE(uncompressed_size);
+    REDUCE_MEMORY_USAGE(size_t(reps_size)); // comp_buffer
   }
 
   DCOUT("num_fields = " << num_fields);
@@ -3758,33 +4626,61 @@ bool CrateReader::ReadFieldSets() {
     return false;
   }
 
+  if (num_fieldsets == 0) {
+    // At least 1 FieldIndex(separator(~0)) must exist.
+    PUSH_ERROR("`FIELDSETS` is empty.");
+    return false;
+  }
+
+  if (num_fieldsets > _config.maxNumFieldSets) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many FieldSets");
+  }
+
+  CHECK_MEMORY_USAGE(size_t(num_fieldsets) * sizeof(uint32_t));
+
   _fieldset_indices.resize(static_cast<size_t>(num_fieldsets));
 
   // Create temporary space for decompressing.
-  std::vector<char> comp_buffer(Usd_IntegerCompression::GetCompressedBufferSize(
-      static_cast<size_t>(num_fieldsets)));
+  size_t compBufferSize = Usd_IntegerCompression::GetCompressedBufferSize(
+      static_cast<size_t>(num_fieldsets));
 
-  std::vector<uint32_t> tmp(static_cast<size_t>(num_fieldsets));
-  std::vector<char> working_space(
-      Usd_IntegerCompression::GetDecompressionWorkingSpaceSize(
-          static_cast<size_t>(num_fieldsets)));
+  CHECK_MEMORY_USAGE(compBufferSize);
+
+  std::vector<char> comp_buffer;
+  comp_buffer.resize(compBufferSize);
+
+  CHECK_MEMORY_USAGE(sizeof(uint32_t) * size_t(num_fieldsets));
+  std::vector<uint32_t> tmp;
+  tmp.resize(static_cast<size_t>(num_fieldsets));
+
+  size_t workBufferSize = Usd_IntegerCompression::GetDecompressionWorkingSpaceSize(
+          static_cast<size_t>(num_fieldsets));
+
+  CHECK_MEMORY_USAGE(workBufferSize);
+  std::vector<char> working_space;
+  working_space.resize(workBufferSize);
 
   uint64_t fsets_size;
   if (!_sr->read8(&fsets_size)) {
-    _err += "Failed to read fieldsets size at `FIELDSETS` section.\n";
-    return false;
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read fieldsets size at `FIELDSETS` section.");
   }
 
   DCOUT("num_fieldsets = " << num_fieldsets << ", fsets_size = " << fsets_size
                            << ", comp_buffer.size = " << comp_buffer.size());
 
-  assert(fsets_size < comp_buffer.size());
+  if (fsets_size > comp_buffer.size()) {
+    // Maybe corrupted?
+    fsets_size = comp_buffer.size();
+  }
+
+  if (fsets_size > _sr->size()) {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "FieldSets compressed data exceeds USDC data.");
+  }
 
   if (fsets_size !=
       _sr->read(size_t(fsets_size), size_t(fsets_size),
                 reinterpret_cast<uint8_t *>(comp_buffer.data()))) {
-    _err += "Failed to read fieldsets data at `FIELDSETS` section.\n";
-    return false;
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "Failed to read fieldsets data at `FIELDSETS` section.");
   }
 
   std::string err;
@@ -3801,6 +4697,9 @@ bool CrateReader::ReadFieldSets() {
     DCOUT("fieldset_index[" << i << "] = " << tmp[i]);
     _fieldset_indices[i].value = tmp[i];
   }
+
+  REDUCE_MEMORY_USAGE(workBufferSize);
+  REDUCE_MEMORY_USAGE(compBufferSize);
 
   return true;
 }
@@ -3891,6 +4790,12 @@ bool CrateReader::ReadSpecs() {
     return false;
   }
 
+  if (num_specs == 0) {
+    // At least 1 Spec(Root Prim '/') must exist.
+    PUSH_ERROR("`SPECS` is empty.");
+    return false;
+  }
+
   DCOUT("num_specs " << num_specs);
 
   CHECK_MEMORY_USAGE(size_t(num_specs) * sizeof(Spec));
@@ -3900,13 +4805,24 @@ bool CrateReader::ReadSpecs() {
   // TODO: Memory size check
 
   // Create temporary space for decompressing.
-  std::vector<char> comp_buffer(Usd_IntegerCompression::GetCompressedBufferSize(
-      static_cast<size_t>(num_specs)));
+  size_t compBufferSize= Usd_IntegerCompression::GetCompressedBufferSize(
+      static_cast<size_t>(num_specs));
+
+  CHECK_MEMORY_USAGE(compBufferSize);
+
+  std::vector<char> comp_buffer;
+  comp_buffer.resize(compBufferSize);
+
+  CHECK_MEMORY_USAGE(size_t(num_specs) * sizeof(uint32_t)); // tmp
 
   std::vector<uint32_t> tmp(static_cast<size_t>(num_specs));
-  std::vector<char> working_space(
-      Usd_IntegerCompression::GetDecompressionWorkingSpaceSize(
-          static_cast<size_t>(num_specs)));
+
+  size_t workBufferSize= Usd_IntegerCompression::GetDecompressionWorkingSpaceSize(
+          static_cast<size_t>(num_specs));
+
+  CHECK_MEMORY_USAGE(workBufferSize);
+  std::vector<char> working_space;
+  working_space.resize(workBufferSize);
 
   // path indices
   {
@@ -3916,7 +4832,10 @@ bool CrateReader::ReadSpecs() {
       return false;
     }
 
-    assert(path_indexes_size < comp_buffer.size());
+    if (path_indexes_size > comp_buffer.size()) {
+      // Maybe corrupted?
+      path_indexes_size = comp_buffer.size();
+    }
 
     if (path_indexes_size !=
         _sr->read(size_t(path_indexes_size), size_t(path_indexes_size),
@@ -3947,7 +4866,10 @@ bool CrateReader::ReadSpecs() {
       return false;
     }
 
-    assert(fset_indexes_size < comp_buffer.size());
+    if (fset_indexes_size > comp_buffer.size()) {
+      // Maybe corrupted?
+      fset_indexes_size = comp_buffer.size();
+    }
 
     if (fset_indexes_size !=
         _sr->read(size_t(fset_indexes_size), size_t(fset_indexes_size),
@@ -3978,7 +4900,10 @@ bool CrateReader::ReadSpecs() {
       return false;
     }
 
-    assert(spectype_size < comp_buffer.size());
+    if (spectype_size > comp_buffer.size()) {
+      // Maybe corrupted?
+      spectype_size = comp_buffer.size();
+    }
 
     if (spectype_size !=
         _sr->read(size_t(spectype_size), size_t(spectype_size),
@@ -4013,6 +4938,10 @@ bool CrateReader::ReadSpecs() {
   }
 #endif
 
+  REDUCE_MEMORY_USAGE(compBufferSize);
+  REDUCE_MEMORY_USAGE(workBufferSize);
+  REDUCE_MEMORY_USAGE(size_t(num_specs) * sizeof(uint32_t)); // tmp
+
   return true;
 }
 
@@ -4042,6 +4971,11 @@ bool CrateReader::ReadPaths() {
     return false;
   }
 
+  if (num_paths == 0) {
+    // At least root path exits.
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "`PATHS` is empty.");
+  }
+
   if (num_paths > _config.maxNumPaths) {
     PUSH_ERROR_AND_RETURN_TAG(kTag, "Too many Paths in `PATHS` section.");
   }
@@ -4060,10 +4994,10 @@ bool CrateReader::ReadPaths() {
   }
 
 #ifdef TINYUSDZ_LOCAL_DEBUG_PRINT
-  std::cout << "# of paths " << _paths.size() << "\n";
+  DCOUT("# of paths " << _paths.size());
 
   for (size_t i = 0; i < _paths.size(); i++) {
-    std::cout << "path[" << i << "] = " << _paths[i].full_path_name() << "\n";
+    DCOUT("path[" << i << "] = " << _paths[i].full_path_name());
   }
 #endif
 
@@ -4106,6 +5040,14 @@ bool CrateReader::ReadBootStrap() {
     return false;
   }
 
+  // Currently up to 0.9.0
+  if ((version[0] == 0) && (version[1] < 10)) {
+    // ok
+  } else {
+    PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Unsupported version {}.{}.{}. TinyUSDZ supports version up to 0.9.0",
+      _version[0], _version[1], _version[2]));
+  }
+
   _toc_offset = 0;
   if (!_sr->read8(&_toc_offset)) {
     PUSH_ERROR("Failed to read TOC offset.");
@@ -4124,6 +5066,9 @@ bool CrateReader::ReadBootStrap() {
 }
 
 bool CrateReader::ReadTOC() {
+
+  DCOUT(fmt::format("Memory budget: {} bytes", _config.maxMemoryBudget));
+
   if ((_toc_offset <= 88) || (_toc_offset >= int64_t(_sr->size()))) {
     PUSH_ERROR("Invalid toc offset.");
     return false;
@@ -4159,7 +5104,34 @@ bool CrateReader::ReadTOC() {
                      << ", start = " << _toc.sections[i].start
                      << ", size = " << _toc.sections[i].size);
 
-    // find index
+    if (_toc.sections[i].start < 0) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Invalid section start byte offset."));
+    }
+
+    if (_toc.sections[i].size <= 0) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Invalid or empty section size."));
+    }
+
+    if (size_t(_toc.sections[i].size) > _sr->size()) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Section size exceeds input USDC data size."));
+    }
+
+    if (size_t(_toc.sections[i].start) > _sr->size()) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Section start byte offset exceeds input USDC data size."));
+    }
+
+    // TODO: handle integer overflow.
+    size_t end_offset = size_t(_toc.sections[i].start + _toc.sections[i].size);
+    if (sizeof(void *) == 4) { // 32bit
+      if (end_offset > std::numeric_limits<int32_t>::max()) {
+        PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Section end offset exceeds 32bit max."));
+      }
+    }
+    if (end_offset > _sr->size()) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Section byte offset + size exceeds input USDC data size."));
+    }
+
+
     if (0 == strncmp(_toc.sections[i].name, "TOKENS",
                      crate::kSectionNameMaxLength)) {
       _tokens_index = int64_t(i);
@@ -4242,218 +5214,6 @@ CrateReader::GetFieldValuePair(const FieldValuePairVector &fvs,
   return nonstd::make_unexpected("FieldValuePair not found with name: `" +
                                  name + "`");
 }
-
-#if 0
-bool CrateReader::ParseAttribute(const FieldValuePairVector &fvs,
-                                 PrimAttrib *attr,
-                                 const std::string &prop_name) {
-  bool success = false;
-
-  DCOUT("fvs.size = " << fvs.size());
-
-  bool has_connection{false};
-
-  Variability variability{Variability::Varying};
-  Interpolation interpolation{Interpolation::Invalid};
-
-  // Check if required field exists.
-  if (!HasFieldValuePair(fvs, kTypeName, kToken)) {
-    PUSH_ERROR(
-        "\"typeName\" field with `token` type must exist for Attribute data.");
-    return false;
-  }
-
-  if (!HasField(kDefault)) {
-    PUSH_ERROR("\"default\" field must exist for Attribute data.");
-    return false;
-  }
-
-  //
-  // Parse properties
-  //
-  for (const auto &fv : fvs) {
-    DCOUT("===  fvs.first " << fv.first
-                            << ", second: " << fv.second.type_name());
-    if ((fv.first == "typeName") && (fv.second.type_name() == "Token")) {
-      attr->set_type_name(fv.second.value<value::token>().str());
-      DCOUT("typeName: " << attr->type_name());
-    } else if (fv.first == "default") {
-      // Nothing to do at there. Process `default` in the later
-      continue;
-    } else if (fv.first == "targetPaths") {
-      // e.g. connection to Material.
-      const ListOp<Path> paths = fv.second.value<ListOp<Path>>();
-
-      DCOUT("ListOp<Path> = " << to_string(paths));
-      // Currently we only support single explicit path.
-      if ((paths.GetExplicitItems().size() == 1)) {
-        const Path &path = paths.GetExplicitItems()[0];
-        (void)path;
-
-        DCOUT("full path: " << path.full_path_name());
-        //DCOUT("local path: " << path.local_path_name());
-
-        primvar::PrimVar var;
-        var.set_scalar(path);
-        attr->set_var(std::move(var));
-
-        has_connection = true;
-
-      } else {
-        return false;
-      }
-    } else if (fv.first == "connectionPaths") {
-      // e.g. connection to texture file.
-      const ListOp<Path> paths = fv.second.value<ListOp<Path>>();
-
-      DCOUT("ListOp<Path> = " << to_string(paths));
-
-      // Currently we only support single explicit path.
-      if ((paths.GetExplicitItems().size() == 1)) {
-        const Path &path = paths.GetExplicitItems()[0];
-        (void)path;
-
-        DCOUT("full path: " << path.full_path_name());
-        //DCOUT("local path: " << path.local_path_name());
-
-        primvar::PrimVar var;
-        var.set_scalar(path);
-        attr->set_var(std::move(var));
-
-        has_connection = true;
-
-      } else {
-        return false;
-      }
-    } else if ((fv.first == "variablity") &&
-               (fv.second.type_name() == "Variability")) {
-      variability = fv.second.value<Variability>();
-    } else if ((fv.first == "interpolation") &&
-               (fv.second.type_name() == "Token")) {
-      interpolation =
-          InterpolationFromString(fv.second.value<value::token>().str());
-    } else {
-      DCOUT("TODO: name: " << fv.first
-                           << ", type: " << fv.second.type_name());
-    }
-  }
-
-  attr->variability = variability;
-  attr->meta.interpolation = interpolation;
-
-  //
-  // Decode value(stored in "default" field)
-  //
-  const auto fvRet = GetFieldValuePair(fvs, kDefault);
-  if (!fvRet) {
-    // This code path should not happen. Just in case.
-    PUSH_ERROR("`default` field not found.");
-    return false;
-  }
-  const auto fv = fvRet.value();
-
-  auto add1DArraySuffix = [](const std::string &a) -> std::string {
-    return a + "[]";
-  };
-
-  {
-    if (fv.first == "default") {
-      attr->name = prop_name;
-
-      DCOUT("fv.second.type_name = " << fv.second.type_name());
-
-#define PROC_SCALAR(__tyname, __ty)                             \
-  }                                                             \
-  else if (fv.second.type_name() == __tyname) {               \
-    auto ret = fv.second.get_value<__ty>();                     \
-    if (!ret) {                                                 \
-      PUSH_ERROR("Failed to decode " << __tyname << " value."); \
-      return false;                                             \
-    }                                                           \
-    primvar::PrimVar var; \
-    var.set_scalar(ret.value()); \
-    attr->set_var(std::move(var));                          \
-    success = true;
-
-#define PROC_ARRAY(__tyname, __ty)                                  \
-  }                                                                 \
-  else if (fv.second.type_name() == add1DArraySuffix(__tyname)) { \
-    auto ret = fv.second.get_value<std::vector<__ty>>();            \
-    if (!ret) {                                                     \
-      PUSH_ERROR("Failed to decode " << __tyname << "[] value.");   \
-      return false;                                                 \
-    }                                                               \
-    primvar::PrimVar var; \
-    var.set_scalar(ret.value()); \
-    attr->set_var(std::move(var));                          \
-    success = true;
-
-      if (0) {  // dummy
-        PROC_SCALAR(value::kFloat, float)
-        PROC_SCALAR(value::kBool, bool)
-        PROC_SCALAR(value::kInt, int)
-        PROC_SCALAR(value::kFloat2, value::float2)
-        PROC_SCALAR(value::kFloat3, value::float3)
-        PROC_SCALAR(value::kFloat4, value::float4)
-        PROC_SCALAR(value::kHalf2, value::half2)
-        PROC_SCALAR(value::kHalf3, value::half3)
-        PROC_SCALAR(value::kHalf4, value::half4)
-        PROC_SCALAR(value::kToken, value::token)
-        PROC_SCALAR(value::kAssetPath, value::AssetPath)
-
-        PROC_SCALAR(value::kMatrix2d, value::matrix2d)
-        PROC_SCALAR(value::kMatrix3d, value::matrix3d)
-        PROC_SCALAR(value::kMatrix4d, value::matrix4d)
-
-        // It seems `token[]` is defined as `TokenVector` in CrateData.
-        // We tret it as scalar
-        PROC_SCALAR("TokenVector", std::vector<value::token>)
-
-        // TODO(syoyo): Use constexpr concat
-        PROC_ARRAY(value::kInt, int32_t)
-        PROC_ARRAY(value::kUInt, uint32_t)
-        PROC_ARRAY(value::kFloat, float)
-        PROC_ARRAY(value::kFloat2, value::float2)
-        PROC_ARRAY(value::kFloat3, value::float3)
-        PROC_ARRAY(value::kFloat4, value::float4)
-        PROC_ARRAY(value::kToken, value::token)
-
-        PROC_ARRAY(value::kMatrix2d, value::matrix2d)
-        PROC_ARRAY(value::kMatrix3d, value::matrix3d)
-        PROC_ARRAY(value::kMatrix4d, value::matrix4d)
-
-        PROC_ARRAY(value::kPoint3h, value::point3h)
-        PROC_ARRAY(value::kPoint3f, value::point3f)
-        PROC_ARRAY(value::kPoint3d, value::point3d)
-
-        PROC_ARRAY(value::kVector3h, value::vector3h)
-        PROC_ARRAY(value::kVector3f, value::vector3f)
-        PROC_ARRAY(value::kVector3d, value::vector3d)
-
-        PROC_ARRAY(value::kNormal3h, value::normal3h)
-        PROC_ARRAY(value::kNormal3f, value::normal3f)
-        PROC_ARRAY(value::kNormal3d, value::normal3d)
-
-        // PROC_ARRAY("Vec2fArray", value::float2)
-        // PROC_ARRAY("Vec3fArray", value::float3)
-        // PROC_ARRAY("Vec4fArray", value::float4)
-        // PROC_ARRAY("IntArray", int)
-        // PROC_ARRAY(kTokenArray, value::token)
-
-      } else {
-        PUSH_ERROR("TODO: " + fv.second.type_name());
-      }
-    }
-  }
-
-  if (!success && has_connection) {
-    // Attribute has a connection(has a path and no `default` field)
-    success = true;
-  }
-
-  return success;
-}
-#endif
 
 
 }  // namespace crate

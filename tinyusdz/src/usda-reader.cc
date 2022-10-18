@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cassert>
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
@@ -90,11 +89,11 @@ RECONSTRUCT_PRIM_DECL(Skeleton);
 RECONSTRUCT_PRIM_DECL(SkelRoot);
 RECONSTRUCT_PRIM_DECL(SkelAnimation);
 RECONSTRUCT_PRIM_DECL(BlendShape);
-RECONSTRUCT_PRIM_DECL(LuxDomeLight);
-RECONSTRUCT_PRIM_DECL(LuxSphereLight);
-RECONSTRUCT_PRIM_DECL(LuxCylinderLight);
-RECONSTRUCT_PRIM_DECL(LuxDiskLight);
-RECONSTRUCT_PRIM_DECL(LuxDistantLight);
+RECONSTRUCT_PRIM_DECL(DomeLight);
+RECONSTRUCT_PRIM_DECL(SphereLight);
+RECONSTRUCT_PRIM_DECL(CylinderLight);
+RECONSTRUCT_PRIM_DECL(DiskLight);
+RECONSTRUCT_PRIM_DECL(DistantLight);
 RECONSTRUCT_PRIM_DECL(GeomMesh);
 RECONSTRUCT_PRIM_DECL(GeomSphere);
 RECONSTRUCT_PRIM_DECL(GeomPoints);
@@ -127,7 +126,7 @@ struct PrimNode {
 // TODO: Move to prim-types.hh?
 
 template <typename T>
-struct PrimTypeTrait;
+struct PrimTypeTraits;
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -136,7 +135,7 @@ struct PrimTypeTrait;
 
 #define DEFINE_PRIM_TYPE(__dty, __name, __tyid)    \
   template <>                                      \
-  struct PrimTypeTrait<__dty> {                    \
+  struct PrimTypeTraits<__dty> {                    \
     using primt_type = __dty;                      \
     static constexpr uint32_t type_id = __tyid;    \
     static constexpr auto prim_type_name = __name; \
@@ -155,11 +154,11 @@ DEFINE_PRIM_TYPE(GeomCylinder, kGeomCylinder, value::TYPE_ID_GEOM_CYLINDER);
 DEFINE_PRIM_TYPE(GeomBasisCurves, kGeomBasisCurves,
                  value::TYPE_ID_GEOM_BASIS_CURVES);
 DEFINE_PRIM_TYPE(GeomSubset, kGeomSubset, value::TYPE_ID_GEOM_GEOMSUBSET);
-DEFINE_PRIM_TYPE(LuxSphereLight, kLuxSphereLight, value::TYPE_ID_LUX_SPHERE);
-DEFINE_PRIM_TYPE(LuxDomeLight, kLuxDomeLight, value::TYPE_ID_LUX_DOME);
-DEFINE_PRIM_TYPE(LuxDiskLight, kLuxDiskLight, value::TYPE_ID_LUX_DISK);
-DEFINE_PRIM_TYPE(LuxDistantLight, kLuxDistantLight, value::TYPE_ID_LUX_DISTANT);
-DEFINE_PRIM_TYPE(LuxCylinderLight,  kLuxCylinderLight, value::TYPE_ID_LUX_CYLINDER);
+DEFINE_PRIM_TYPE(SphereLight, kSphereLight, value::TYPE_ID_LUX_SPHERE);
+DEFINE_PRIM_TYPE(DomeLight, kDomeLight, value::TYPE_ID_LUX_DOME);
+DEFINE_PRIM_TYPE(DiskLight, kDiskLight, value::TYPE_ID_LUX_DISK);
+DEFINE_PRIM_TYPE(DistantLight, kDistantLight, value::TYPE_ID_LUX_DISTANT);
+DEFINE_PRIM_TYPE(CylinderLight,  kCylinderLight, value::TYPE_ID_LUX_CYLINDER);
 DEFINE_PRIM_TYPE(Material, kMaterial, value::TYPE_ID_MATERIAL);
 DEFINE_PRIM_TYPE(Shader, kShader, value::TYPE_ID_SHADER);
 DEFINE_PRIM_TYPE(SkelRoot, kSkelRoot, value::TYPE_ID_SKEL_ROOT);
@@ -203,8 +202,6 @@ class VariableDef {
 };
 
 namespace {
-
-using ReferenceList = std::vector<std::pair<ListEditQual, Reference>>;
 
 #if 0
 // Extract array of References from Variable.
@@ -461,7 +458,7 @@ class USDAReader::Impl {
   template <typename T>
   bool ReconstructPrim(
       const prim::PropertyMap &properties,
-      const ReferenceList &references,
+      const prim::ReferenceList &references,
       T *out);
 
 #if 0
@@ -480,12 +477,11 @@ class USDAReader::Impl {
   template <typename T>
   bool RegisterReconstructCallback() {
     _parser.RegisterPrimConstructFunction(
-        PrimTypeTrait<T>::prim_type_name,
-        [&](const Path &full_path, const Path &prim_name, const int64_t primIdx,
+        PrimTypeTraits<T>::prim_type_name,
+        [&](const Path &full_path, const Specifier spec, const Path &prim_name, const int64_t primIdx,
             const int64_t parentPrimIdx,
             const prim::PropertyMap &properties,
-            const ReferenceList &references,
-            const ascii::AsciiParser::PrimMetaInput &in_meta)
+            const ascii::AsciiParser::PrimMetaMap &in_meta)
             -> nonstd::expected<bool, std::string> {
           if (!prim_name.IsValid()) {
             return nonstd::make_unexpected("Invalid Prim name: " +
@@ -517,7 +513,7 @@ class USDAReader::Impl {
                 "Failed to process Prim metadataum.");
           }
 
-          DCOUT("primType = " << value::TypeTrait<T>::type_name()
+          DCOUT("primType = " << value::TypeTraits<T>::type_name()
                               << ", node.size "
                               << std::to_string(_prim_nodes.size())
                               << ", primIdx = " << primIdx
@@ -526,6 +522,11 @@ class USDAReader::Impl {
           DCOUT("full_path = " << full_path.full_path_name());
           DCOUT("primName = " << prim_name.full_path_name());
 
+          prim::ReferenceList references;
+          if (prim.meta.references) {
+            references = prim.meta.references.value();
+          }
+
           bool ret = ReconstructPrim<T>(properties, references, &prim);
 
           if (!ret) {
@@ -533,6 +534,7 @@ class USDAReader::Impl {
                                            prim_name.full_path_name());
           }
 
+          prim.spec = spec;
           prim.name = prim_name.GetPrimPart();
 
           // Add to scene graph.
@@ -579,6 +581,10 @@ class USDAReader::Impl {
           _stage.GetMetas().doc = metas.doc;
           if (metas.upAxis) {
             _stage.GetMetas().upAxis = metas.upAxis.value();
+          }
+
+          if (metas.subLayers.size()) {
+            _stage.GetMetas().subLayers = metas.subLayers;
           }
 
           _stage.GetMetas().defaultPrim = metas.defaultPrim;
@@ -629,7 +635,7 @@ class USDAReader::Impl {
     });
   }
 
-  bool ReconstructPrimMeta(const ascii::AsciiParser::PrimMetaInput &in_meta,
+  bool ReconstructPrimMeta(const ascii::AsciiParser::PrimMetaMap &in_meta,
                            PrimMeta *out) {
 
     auto ApiSchemaHandler = [](const std::string &tok)
@@ -647,6 +653,28 @@ class USDAReader::Impl {
                          "Preliminary_PhysicsColliderAPI"),
       };
       return EnumHandler<APISchemas::APIName>("apiSchemas", tok, enums);
+    };
+
+    auto BuildVariants = [](const CustomDataType &dict) -> nonstd::expected<VariantSelectionMap, std::string> {
+
+      // Allow empty dict.
+
+      VariantSelectionMap m;
+
+      for (const auto &item : dict) {
+        // TODO: duplicated key check?
+        if (auto pv = item.second.Get<std::string>()) {
+          m[item.first] = pv.value();
+        } else if (auto pvs = item.second.Get<StringData>()) {
+          // TODO: store triple-quote info
+          m[item.first] = pvs.value().value;
+        } else {
+          return nonstd::make_unexpected(fmt::format("TinyUSDZ only accepts `string` value for `variants` element, but got type `{}`(type_id {}).", item.second.TypeName(), item.second.TypeId()));
+        }
+      }
+
+      return std::move(m);
+
     };
 
     DCOUT("ReconstructPrimMeta");
@@ -668,6 +696,20 @@ class USDAReader::Impl {
         } else {
           PUSH_ERROR_AND_RETURN(
               "(Internal error?) `active` metadataum is not type `bool`. got `"
+              << var.type << "`.");
+        }
+      } else if (meta.first == "hidden") {
+        DCOUT("hidden. type = " << var.type);
+        if (var.type == "bool") {
+          if (auto pv = var.Get<bool>()) {
+            out->hidden = pv.value();
+          } else {
+            PUSH_ERROR_AND_RETURN(
+                "(Internal error?) `hidden` metadataum is not type `bool`.");
+          }
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "(Internal error?) `hidden` metadataum is not type `bool`. got `"
               << var.type << "`.");
         }
 
@@ -740,12 +782,78 @@ class USDAReader::Impl {
               "`dictionary`. got type `"
               << var.type << "`");
         }
+
+      } else if (meta.first == "variants") {
+        if (auto pv = var.Get<CustomDataType>()) {
+          auto pm = BuildVariants(pv.value());
+          if (!pm) {
+            PUSH_ERROR_AND_RETURN(pm.error());
+          }
+          out->variants = (*pm);
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "(Internal error?) `variants` metadataum is not type "
+              "`dictionary`. got type `"
+              << var.type << "`");
+        }
+      } else if (meta.first == "inherits") {
+        if (auto pvb = var.Get<value::ValueBlock>()) {
+          out->inherits = std::make_pair(listEditQual, std::vector<Path>());
+        } else if (auto pv = var.Get<std::vector<Path>>()) {
+          out->inherits = std::make_pair(listEditQual, pv.value());
+        } else if (auto pvp = var.Get<Path>()) {
+          std::vector<Path> vs;
+          vs.push_back(pvp.value());
+          out->inherits = std::make_pair(listEditQual, vs);
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "(Internal error?) `inherits` metadataum should be either `path` or `path[]`. "
+              "got type `"
+              << var.type << "`");
+        }
+
+      } else if (meta.first == "specializes") {
+        if (auto pvb = var.Get<value::ValueBlock>()) {
+          out->specializes = std::make_pair(listEditQual, std::vector<Path>());
+        } else if (auto pv = var.Get<std::vector<Path>>()) {
+          out->specializes = std::make_pair(listEditQual, pv.value());
+        } else if (auto pvp = var.Get<Path>()) {
+          std::vector<Path> vs;
+          vs.push_back(pvp.value());
+          out->specializes = std::make_pair(listEditQual, vs);
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "(Internal error?) `specializes` metadataum should be either `path` or `path[]`. "
+              "got type `"
+              << var.type << "`");
+        }
+
+      } else if (meta.first == "variantSets") {
+        // treat as `string`
+        if (auto pvb = var.Get<value::ValueBlock>()) {
+          out->variantSets = std::make_pair(listEditQual, std::vector<std::string>());
+        } else if (auto pv = var.Get<StringData>()) {
+          std::vector<std::string> vs;
+          vs.push_back(pv.value().value);
+          out->variantSets = std::make_pair(listEditQual, vs);
+        } else if (auto pvs = var.Get<std::string>()) {
+          std::vector<std::string> vs;
+          vs.push_back(pvs.value());
+          out->variantSets = std::make_pair(listEditQual, vs);
+        } else if (auto pva = var.Get<std::vector<std::string>>()) {
+          out->variantSets = std::make_pair(listEditQual, pva.value());
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "(Internal error?) `variantSets` metadataum is not type "
+              "`string` or `string[]`. got type `"
+              << var.type << "`");
+        }
       } else if (meta.first == "apiSchemas") {
         DCOUT("apiSchemas. type = " << var.type);
         if (var.type == "token[]") {
           APISchemas apiSchemas;
-          if (listEditQual != ListEditQual::Prepend) {
-            PUSH_ERROR_AND_RETURN("(PrimMeta) " << "ListEdit op for `apiSchemas` must be `prepend` in TinyUSDZ, but got `" << to_string(listEditQual) << "`");
+          if ((listEditQual != ListEditQual::Prepend) && (listEditQual != ListEditQual::ResetToExplicit)) {
+            PUSH_ERROR_AND_RETURN("(PrimMeta) " << "ListEdit op for `apiSchemas` must be empty or `prepend` in TinyUSDZ, but got `" << to_string(listEditQual) << "`");
           }
           apiSchemas.listOpQual = listEditQual;
 
@@ -771,6 +879,54 @@ class USDAReader::Impl {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "(Internal error?) `apiSchemas` metadataum is not type "
           "`token[]`. got type `"
           << var.type << "`");
+        }
+      } else if (meta.first == "references") {
+
+        if (var.IsBlocked()) {
+          // create references with empty array.
+          out->references = std::make_pair(listEditQual, std::vector<Reference>());
+        } else if (auto pv = var.Get<Reference>()) {
+          // To Reference
+          std::vector<Reference> refs;
+          refs.emplace_back(pv.value());
+          out->references = std::make_pair(listEditQual, refs);
+        } else if (auto pva = var.Get<std::vector<Reference>>()) {
+          out->references = std::make_pair(listEditQual, pva.value());
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "(Internal error?) `references` metadataum is not type "
+              "`path` or `path[]`. got type `"
+              << var.type << "`");
+        }
+      } else if (meta.first == "payload") {
+
+        if (var.IsBlocked()) {
+          // create payload with empty array.
+          out->payload = std::make_pair(listEditQual, std::vector<Payload>());
+        } else if (auto pv = var.Get<Reference>()) {
+          // To Payload
+          std::vector<Payload> refs;
+          Payload ref;
+          ref.asset_path = pv.value().asset_path;
+          ref._prim_path = pv.value().prim_path;
+          // TODO: Other member variables
+          refs.emplace_back(ref);
+          out->payload = std::make_pair(listEditQual, refs);
+        } else if (auto pva = var.Get<std::vector<Reference>>()) {
+          std::vector<Payload> refs;
+          for (const auto &item : pva.value()) {
+            Payload ref;
+            ref.asset_path = item.asset_path;
+            ref._prim_path = item.prim_path;
+            // TODO: Other member variables
+            refs.emplace_back(ref);
+          }
+          out->payload = std::make_pair(listEditQual, refs);
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "(Internal error?) `references` metadataum is not type "
+              "`path` or `path[]`. got type `"
+              << var.type << "`");
         }
       } else {
         // string-only data?
@@ -865,7 +1021,7 @@ class USDAReader::Impl {
   nonstd::optional<tinyusdz::Stage> _imported_scene;  // Imported scene.
 
   // "class" defs
-  std::map<std::string, Klass> _klasses;
+  //std::map<std::string, Klass> _klasses;
 
   std::stack<std::string> _path_stack;
 
@@ -915,7 +1071,7 @@ void ReconstructNodeRec(const size_t idx,
     ReconstructNodeRec(cidx, prim_nodes, prim);
   }
 
-  parent.children.emplace_back(std::move(prim));
+  parent.children().emplace_back(std::move(prim));
 }
 
 }  // namespace
@@ -944,12 +1100,16 @@ bool USDAReader::Impl::ReconstructStage() {
 #endif
     }
 
-    DCOUT("prim[" << idx << "].num_children = " << prim.children.size());
+    // root's elementPath is empty"/"
+    prim.element_path() = Path("", "");
+
+    DCOUT("root prim[" << idx << "].elementPath = " << dump_path(prim.element_path()));
+    DCOUT("root prim[" << idx << "].num_children = " << prim.children().size());
 
     size_t sz = _stage.GetRootPrims().size();
     _stage.GetRootPrims().emplace_back(std::move(prim));
 
-    DCOUT("num_children = " << _stage.GetRootPrims()[sz].children.size());
+    DCOUT("num_children = " << _stage.GetRootPrims()[sz].children().size());
   }
 
   return true;
@@ -958,7 +1118,7 @@ bool USDAReader::Impl::ReconstructStage() {
 template <>
 bool USDAReader::Impl::ReconstructPrim(
     const prim::PropertyMap &properties,
-    const ReferenceList &references,
+    const prim::ReferenceList &references,
     Xform *xform) {
 
   std::string err;
@@ -976,7 +1136,7 @@ template <>
 bool USDAReader::Impl::RegisterReconstructCallback<GPrim>() {
   // TODO: Move to ReconstructPrim
   _parser.RegisterPrimConstructFunction(
-      PrimTypeTrait<GPrim>::prim_type_name,
+      PrimTypeTraits<GPrim>::prim_type_name,
       [&](const Path &path, const PropertyMap &properties,
           ReferenceList &references) {
         // TODO: Implement
@@ -995,7 +1155,7 @@ bool USDAReader::Impl::RegisterReconstructCallback<GPrim>() {
           if (item.second.IsRel()) {
             PUSH_WARN("TODO: rel");
           } else {
-            gprim.props[item.first].attrib = item.second.attrib;
+            gprim.props[item.first].attrib = item.second.GetAttrib();
           }
         }
 
@@ -1018,13 +1178,13 @@ template <>
 bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
   _parser.RegisterPrimConstructFunction(
       "GeomSubset",
-      [&](const Path &full_path, const Path &prim_name, const int64_t primIdx,
+      [&](const Path &full_path, const Specifier spec, const Path &prim_name, const int64_t primIdx,
           const int64_t parentPrimIdx,
           const prim::PropertyMap &properties,
-          const ReferenceList &references,
-          const ascii::AsciiParser::PrimMetaInput &in_meta)
+          //const prim::ReferenceList &references,
+          const ascii::AsciiParser::PrimMetaMap &in_meta)
           -> nonstd::expected<bool, std::string> {
-        const Path &parent = full_path.GetParentPrim();
+        const Path &parent = full_path.GetParentPrimPath();
         if (!parent.IsValid()) {
           return nonstd::make_unexpected("Invalid Prim path.");
         }
@@ -1082,8 +1242,8 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
               PUSH_ERROR_AND_RETURN(
                   "`elementType` property as Relation is not supported.");
             }
-            if (auto pv = item.second.attrib.var.get_value<value::token>()) {
-              if (item.second.attrib.uniform) {
+            if (auto pv = item.second.GetAttrib().var.get_value<value::token>()) {
+              if (item.second.GetAttrib().uniform) {
                 auto e = subset.SetElementType(pv.value().str());
                 if (!e) {
                   PUSH_ERROR_AND_RETURN(e.error());
@@ -1099,8 +1259,8 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
                   "`familyType` property as Relation is not supported.");
             }
 
-            if (auto pv = item.second.attrib.var.get_value<value::token>()) {
-              if (item.second.attrib.uniform) {
+            if (auto pv = item.second.GetAttrib().var.get_value<value::token>()) {
+              if (item.second.GetAttrib().uniform) {
                 auto e = subset.SetFamilyType(pv.value().str());
                 if (!e) {
                   PUSH_ERROR_AND_RETURN(e.error());
@@ -1118,7 +1278,7 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
             }
 
             if (auto pv =
-                    item.second.attrib.var.get_value<std::vector<int>>()) {
+                    item.second.GetAttrib().var.get_value<std::vector<int>>()) {
               // int -> uint
               std::transform(pv.value().begin(), pv.value().end(),
                              std::back_inserter(subset.indices),
@@ -1127,7 +1287,7 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
 
             PUSH_ERROR_AND_RETURN(
                 "`indices` property must be `int[]` type, but got `" +
-                item.second.attrib.var.type_name() + "`");
+                item.second.GetAttrib().var.type_name() + "`");
 
           } else if (item.first == "material:binding") {
             if (!item.second.IsRel()) {
@@ -1153,8 +1313,8 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
               PUSH_ERROR_AND_RETURN(
                   "`elementType` property as Relation is not supported.");
             }
-            if (auto pv = item.second.attrib.get_value<value::token>()) {
-              if (item.second.attrib.variability == Variability::Uniform) {
+            if (auto pv = item.second.GetAttrib().get_value<value::token>()) {
+              if (item.second.GetAttrib().variability == Variability::Uniform) {
                 auto e = subset.SetElementType(pv.value().str());
                 if (!e) {
                   PUSH_ERROR_AND_RETURN(e.error());
@@ -1170,8 +1330,8 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
                   "`familyType` property as Relation is not supported.");
             }
 
-            if (auto pv = item.second.attrib.get_value<value::token>()) {
-              if (item.second.attrib.variability == Variability::Uniform) {
+            if (auto pv = item.second.GetAttrib().get_value<value::token>()) {
+              if (item.second.GetAttrib().variability == Variability::Uniform) {
                 auto e = subset.SetFamilyType(pv.value().str());
                 if (!e) {
                   PUSH_ERROR_AND_RETURN(e.error());
@@ -1189,7 +1349,7 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
             }
 
             if (auto pv =
-                    item.second.attrib.get_value<std::vector<int>>()) {
+                    item.second.GetAttrib().get_value<std::vector<int>>()) {
               // int -> uint
               std::transform(pv.value().begin(), pv.value().end(),
                              std::back_inserter(subset.indices),
@@ -1197,7 +1357,7 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
             } else {
               PUSH_ERROR_AND_RETURN(
                   "`indices` property must be `int[]` type, but got `" +
-                  item.second.attrib.type_name() + "`");
+                  item.second.GetAttrib().type_name() + "`");
             }
 
           } else if (item.first == "material:binding") {
@@ -1212,12 +1372,12 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
                   "`familyName` property as Relation is not supported.");
             }
 
-            if (auto pv = item.second.attrib.get_value<value::token>()) {
+            if (auto pv = item.second.GetAttrib().get_value<value::token>()) {
               subset.familyName = pv.value();
             } else {
               PUSH_ERROR_AND_RETURN(
                   "`familyName` property must be `token` type, but got `" +
-                  item.second.attrib.type_name() + "`");
+                  item.second.GetAttrib().type_name() + "`");
             }
           } else {
             PUSH_WARN("GeomSubset: TODO: " + item.first);
@@ -1225,6 +1385,7 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
         }
 
         subset.name = prim_name.GetPrimPart();
+        subset.spec = spec;
         subset.meta = meta;
 
         // Add to scene graph.
@@ -1259,7 +1420,7 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
 template <>
 bool USDAReader::Impl::ReconstructPrim(
     const prim::PropertyMap &properties,
-    const ReferenceList &references,
+    const prim::ReferenceList &references,
     GPrim *gprim) {
   (void)gprim;
 
@@ -1274,7 +1435,7 @@ bool USDAReader::Impl::ReconstructPrim(
 template <>
 bool USDAReader::Impl::ReconstructPrim<NodeGraph>(
     const prim::PropertyMap &properties,
-    const ReferenceList &references,
+    const prim::ReferenceList &references,
     NodeGraph *graph) {
   (void)properties;
   (void)references;
@@ -1305,12 +1466,12 @@ bool USDAReader::Impl::ReconstructPrim<Material>(
 template <typename T>
 bool USDAReader::Impl::ReconstructPrim(
     const prim::PropertyMap &properties,
-    const ReferenceList &references,
+    const prim::ReferenceList &references,
     T *prim) {
 
   std::string err;
   if (!prim::ReconstructPrim(properties, references, prim, &_warn, &err)) {
-    PUSH_ERROR_AND_RETURN(fmt::format("Failed to reconstruct {} Prim: {}", value::TypeTrait<T>::type_name(), err));
+    PUSH_ERROR_AND_RETURN(fmt::format("Failed to reconstruct {} Prim: {}", value::TypeTraits<T>::type_name(), err));
   }
   return true;
 }
@@ -1331,9 +1492,9 @@ bool USDAReader::Impl::Read(ascii::LoadState state) {
 
   RegisterPrimIdxAssignCallback();
 
-  RegisterReconstructCallback<Model>();  // `def` with no type.
+  RegisterReconstructCallback<Model>();  // Generic prim.
 
-  RegisterReconstructCallback<GPrim>();
+  RegisterReconstructCallback<GPrim>(); // Geometric prim
 
   RegisterReconstructCallback<Xform>();
   RegisterReconstructCallback<GeomCube>();
@@ -1352,11 +1513,11 @@ bool USDAReader::Impl::Read(ascii::LoadState state) {
 
   RegisterReconstructCallback<Scope>();
 
-  RegisterReconstructCallback<LuxSphereLight>();
-  RegisterReconstructCallback<LuxDomeLight>();
-  RegisterReconstructCallback<LuxDiskLight>();
-  RegisterReconstructCallback<LuxDistantLight>();
-  RegisterReconstructCallback<LuxCylinderLight>();
+  RegisterReconstructCallback<SphereLight>();
+  RegisterReconstructCallback<DomeLight>();
+  RegisterReconstructCallback<DiskLight>();
+  RegisterReconstructCallback<DistantLight>();
+  RegisterReconstructCallback<CylinderLight>();
 
   RegisterReconstructCallback<SkelRoot>();
   RegisterReconstructCallback<Skeleton>();

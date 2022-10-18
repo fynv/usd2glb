@@ -7,11 +7,13 @@
 
 #include <sstream>
 
-#include "common-macros.inc"
-#include "prim-types.hh"
 #include "pprinter.hh"
+#include "prim-types.hh"
+#include "tiny-format.hh"
 #include "xform.hh"
-
+//
+#include "common-macros.inc"
+#include "math-util.inc"
 
 namespace tinyusdz {
 
@@ -21,8 +23,8 @@ constexpr auto kPrimvarsNormals = "primvars:normals";
 
 }  // namespace
 
-const std::vector<value::point3f> GeomMesh::GetPoints(double time, TimeSampleInterpolationType interp) const {
-
+const std::vector<value::point3f> GeomMesh::GetPoints(
+    double time, TimeSampleInterpolationType interp) const {
   std::vector<value::point3f> dst;
 
   if (!points.authored() || points.IsBlocked()) {
@@ -45,10 +47,10 @@ const std::vector<value::point3f> GeomMesh::GetPoints(double time, TimeSampleInt
   }
 
   return dst;
-
 }
 
-const std::vector<value::normal3f> GeomMesh::GetNormals(double time, TimeSampleInterpolationType interp) const {
+const std::vector<value::normal3f> GeomMesh::GetNormals(
+    double time, TimeSampleInterpolationType interp) const {
   std::vector<value::normal3f> dst;
 
   if (props.count(kPrimvarsNormals)) {
@@ -58,18 +60,18 @@ const std::vector<value::normal3f> GeomMesh::GetNormals(double time, TimeSampleI
       return dst;
     }
 
-    if (prop.attrib.get_var().is_timesample()) {
+    if (prop.GetAttrib().get_var().is_timesample()) {
       // TODO:
       return dst;
     }
 
-    if (prop.attrib.type_name() == "normal3f[]") {
-      if (auto pv = prop.attrib.get_value<std::vector<value::normal3f>>()) {
+    if (prop.GetAttrib().type_name() == "normal3f[]") {
+      if (auto pv =
+              prop.GetAttrib().get_value<std::vector<value::normal3f>>()) {
         dst = pv.value();
       }
     }
   } else if (normals.authored()) {
-
     if (normals.IsConnection()) {
       // TODO
       return dst;
@@ -95,9 +97,9 @@ const std::vector<value::normal3f> GeomMesh::GetNormals(double time, TimeSampleI
 Interpolation GeomMesh::GetNormalsInterpolation() const {
   if (props.count(kPrimvarsNormals)) {
     const auto &prop = props.at(kPrimvarsNormals);
-    if (prop.attrib.type_name() == "normal3f[]") {
-      if (prop.attrib.meta.interpolation) {
-        return prop.attrib.meta.interpolation.value();
+    if (prop.GetAttrib().type_name() == "normal3f[]") {
+      if (prop.GetAttrib().meta.interpolation) {
+        return prop.GetAttrib().meta.interpolation.value();
       }
     }
   } else if (normals.meta.interpolation) {
@@ -105,6 +107,42 @@ Interpolation GeomMesh::GetNormalsInterpolation() const {
   }
 
   return Interpolation::Vertex;  // default 'vertex'
+}
+
+const std::vector<int32_t> GeomMesh::GetFaceVertexCounts() const {
+  std::vector<int32_t> dst;
+
+  if (!faceVertexCounts.authored() || faceVertexCounts.IsBlocked()) {
+    return dst;
+  }
+
+  if (faceVertexCounts.IsConnection()) {
+    // TODO: connection
+    return dst;
+  }
+
+  if (auto pv = faceVertexCounts.GetValue()) {
+    dst = pv.value().value;
+  }
+  return dst;
+}
+
+const std::vector<int32_t> GeomMesh::GetFaceVertexIndices() const {
+  std::vector<int32_t> dst;
+
+  if (!faceVertexIndices.authored() || faceVertexIndices.IsBlocked()) {
+    return dst;
+  }
+
+  if (faceVertexIndices.IsConnection()) {
+    // TODO: connection
+    return dst;
+  }
+
+  if (auto pv = faceVertexIndices.GetValue()) {
+    dst = pv.value().value;
+  }
+  return dst;
 }
 
 void GeomMesh::Initialize(const GPrim &gprim) {
@@ -123,7 +161,7 @@ void GeomMesh::Initialize(const GPrim &gprim) {
       continue;
     }
 
-    const PrimAttrib &attr = prop.attrib;
+    const PrimAttrib &attr = prop.GetAttrib();
 
     if (attr_name == "points") {
       //if (auto p = primvar::as_vector<value::float3>(&attr.var)) {
@@ -169,8 +207,8 @@ void GeomMesh::Initialize(const GPrim &gprim) {
   extent = gprim.extent;
   purpose = gprim.purpose;
 
-  //displayColor = gprim.displayColor;
-  //displayOpacity = gprim.displayOpacity;
+  // displayColor = gprim.displayColor;
+  // displayOpacity = gprim.displayOpacity;
 
 #if 0  // TODO
 
@@ -208,12 +246,12 @@ nonstd::expected<bool, std::string> GeomMesh::ValidateGeomSubset() {
   }
 
   if (faceVertexCounts.authored()) {
-    return nonstd::make_unexpected(
-        "TODO: Support faceVertexCounts.connect\n");
+    return nonstd::make_unexpected("TODO: Support faceVertexCounts.connect\n");
   }
 
   if (faceVertexCounts.GetValue()) {
-    const auto &fv = faceVertexCounts.GetValue().value().value;
+    const auto fvp = faceVertexCounts.GetValue();
+    const auto &fv = fvp.value().value;
     size_t n = fv.size();
 
     // Currently we only check if face ids are valid.
@@ -230,159 +268,6 @@ nonstd::expected<bool, std::string> GeomMesh::ValidateGeomSubset() {
   // TODO
   return nonstd::make_unexpected(
       "TODO: Implent GeomMesh::ValidateGeomSubset\n");
-}
-
-namespace {
-
-#if 0
-value::matrix4d GetTransform(XformOp xform)
-{
-  value::matrix4d m;
-  Identity(&m);
-
-  if (xform.op == XformOp::OpType::TRANSFORM) {
-    if (auto v = xform.value.get<value::matrix4d>()) {
-      m = v.value();
-    }
-  } else if (xform.op == XformOp::OpType::TRANSLATE) {
-      if (auto sf = xform.value.get<value::float3>()) {
-        m.m[3][0] = double(sf.value()[0]);
-        m.m[3][1] = double(sf.value()[1]);
-        m.m[3][2] = double(sf.value()[2]);
-      } else if (auto sd = xform.value.get<value::double3>()) {
-        m.m[3][0] = sd.value()[0];
-        m.m[3][1] = sd.value()[1];
-        m.m[3][2] = sd.value()[2];
-      }
-  } else if (xform.op == XformOp::OpType::SCALE) {
-      if (auto sf = xform.value.get<value::float3>()) {
-        m.m[0][0] = double(sf.value()[0]);
-        m.m[1][1] = double(sf.value()[1]);
-        m.m[2][2] = double(sf.value()[2]);
-      } else if (auto sd = xform.value.get<value::double3>()) {
-        m.m[0][0] = sd.value()[0];
-        m.m[1][1] = sd.value()[1];
-        m.m[2][2] = sd.value()[2];
-      }
-  } else {
-    DCOUT("TODO: xform.op = " << XformOp::GetOpTypeName(xform.op));
-  }
-
-  return m;
-}
-#endif
-
-}  // namespace
-
-bool Xformable::EvaluateXformOps(value::matrix4d *out_matrix) const {
-
-  value::matrix4d cm;
-
-  // Concat matrices
-  for (const auto &x : xformOps) {
-    value::matrix4d m;
-    Identity(&m);
-    (void)x;
-
-    if (x.IsTimeSamples()) {
-      // TODO:
-      DCOUT("TODO: xformOp property with timeSamples.");
-      return false;
-    }
-
-    if (x.op == XformOp::OpType::ResetXformStack) {
-      // Reset previous matrices
-      // TODO: Check if !resetXformStack! is only appears at the first element of xformOps.
-      Identity(out_matrix);
-    } else if (x.op == XformOp::OpType::Scale) {
-      if (auto sxf = x.get_scalar_value<value::float3>()) {
-        m.m[0][0] = double(sxf.value()[0]);
-        m.m[1][1] = double(sxf.value()[1]);
-        m.m[2][2] = double(sxf.value()[2]);
-      } else if (auto sxd = x.get_scalar_value<value::double3>()) {
-        m.m[0][0] = sxd.value()[0];
-        m.m[1][1] = sxd.value()[1];
-        m.m[2][2] = sxd.value()[2];
-      } else {
-        return false;
-      }
-
-    } else if (x.op == XformOp::OpType::Translate) {
-      if (auto txf = x.get_scalar_value<value::float3>()) {
-        m.m[3][0] = double(txf.value()[0]);
-        m.m[3][1] = double(txf.value()[1]);
-        m.m[3][2] = double(txf.value()[2]);
-      } else if (auto txd = x.get_scalar_value<value::double3>()) {
-        m.m[3][0] = txd.value()[0];
-        m.m[3][1] = txd.value()[1];
-        m.m[3][2] = txd.value()[2];
-      } else {
-        return false;
-      }
-      // FIXME: Validate ROTATE_X, _Y, _Z implementation
-    } else if (x.op == XformOp::OpType::RotateX) {
-      double theta;
-      if (auto rf = x.get_scalar_value<float>()) {
-        theta = double(rf.value());
-      } else if (auto rd = x.get_scalar_value<double>()) {
-        theta = rd.value();
-      } else {
-        return false;
-      }
-
-      m.m[1][1] = std::cos(theta);
-      m.m[1][2] = std::sin(theta);
-      m.m[2][1] = -std::sin(theta);
-      m.m[2][2] = std::cos(theta);
-    } else if (x.op == XformOp::OpType::RotateY) {
-      double theta;
-      if (auto f = x.get_scalar_value<float>()) {
-        theta = double(f.value());
-      } else if (auto d = x.get_scalar_value<double>()) {
-        theta = d.value();
-      } else {
-        return false;
-      }
-
-      m.m[0][0] = std::cos(theta);
-      m.m[0][2] = -std::sin(theta);
-      m.m[2][0] = std::sin(theta);
-      m.m[2][2] = std::cos(theta);
-    } else if (x.op == XformOp::OpType::RotateZ) {
-      double theta;
-      if (auto f = x.get_scalar_value<float>()) {
-        theta = double(f.value());
-      } else if (auto d = x.get_scalar_value<double>()) {
-        theta = d.value();
-      } else {
-        return false;
-      }
-
-      m.m[0][0] = std::cos(theta);
-      m.m[0][1] = std::sin(theta);
-      m.m[1][0] = -std::sin(theta);
-      m.m[1][1] = std::cos(theta);
-    } else if (x.op == XformOp::OpType::Orient) {
-      // quat(w, x, y, z)
-      if (auto f = x.get_scalar_value<value::quatf>()) {
-        m = to_matrix(f.value());
-      } else if (auto d = x.get_scalar_value<value::quatd>()) {
-        m = to_matrix(d.value());
-      } else {
-        return false;
-      }
-    } else {
-      // TODO
-      DCOUT("TODO: XformOp " << to_string(x.op));
-      return false;
-    }
-
-    cm = Mult<value::matrix4d, double, 4>(cm, m);
-  }
-
-  (*out_matrix) = cm;
-
-  return true;
 }
 
 }  // namespace tinyusdz

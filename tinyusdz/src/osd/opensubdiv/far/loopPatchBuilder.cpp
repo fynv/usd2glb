@@ -22,8 +22,10 @@
 //   language governing permissions and limitations under the Apache License.
 //
 
-#ifdef _WIN32
+#ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #endif
 
 #include "../far/loopPatchBuilder.h"
@@ -42,6 +44,8 @@ using Vtr::ConstArray;
 using Vtr::internal::StackBuffer;
 
 namespace Far {
+
+constexpr auto kPI = 3.14159265358979323846;
 
 //
 //  A simple struct with methods to compute Loop limit points (following
@@ -178,7 +182,7 @@ LoopLimits<REAL>::ComputeInteriorPointWeights(int valence, int faceInRing,
         //  t2.  Combine the weights for the point in a single set for t2 and
         //  then copy it into the appropriate orientation for ep and em:
         //
-        double theta = 2.0 * M_PI / (double) valence;
+        double theta = 2.0 * kPI / (double) valence;
 
         REAL tanScale = (REAL) ((3.0 + 2.0 * std::cos(theta)) / (6.0 * valence));
 
@@ -256,7 +260,7 @@ LoopLimits<REAL>::ComputeBoundaryPointWeights(int valence, int faceInRing,
             epWeights[1] = (REAL) (1.0 / 3.0);
         } else {
             int  iEdgeNext     = faceInRing;
-            REAL faceAngle     = (REAL) (M_PI / (double)(valence - 1));
+            REAL faceAngle     = (REAL) (kPI / (double)(valence - 1));
             REAL faceAngleNext = faceAngle * (REAL)iEdgeNext;
             REAL cosAngleNext  = std::cos(faceAngleNext);
             REAL sinAngleNext  = std::sin(faceAngleNext);
@@ -276,7 +280,7 @@ LoopLimits<REAL>::ComputeBoundaryPointWeights(int valence, int faceInRing,
             emWeights[valence] = (REAL) (1.0 / 3.0);
         } else {
             int  iEdgePrev     = (faceInRing + 1) % valence;
-            REAL faceAngle     = (REAL) (M_PI / (double)(valence - 1));
+            REAL faceAngle     = (REAL) (kPI / (double)(valence - 1));
             REAL faceAnglePrev = faceAngle * (REAL)iEdgePrev;
             REAL cosAnglePrev  = std::cos(faceAnglePrev);
             REAL sinAnglePrev  = std::sin(faceAnglePrev);
@@ -741,11 +745,11 @@ GregoryTriConverter<REAL>::Initialize(SourcePatch const & sourcePatch) {
         corner.isRegular = ((corner.numFaces << corner.isBoundary) == 6)
                          && !corner.isSharp;
         if (corner.isRegular) {
-            corner.faceAngle = (REAL)(M_PI / 3.0);
+            corner.faceAngle = (REAL)(kPI / 3.0);
             corner.cosFaceAngle = 0.5f;
         } else {
             corner.faceAngle =
-                (corner.isBoundary ? REAL(M_PI) : REAL(2.0 * M_PI))
+                (corner.isBoundary ? REAL(kPI) : REAL(2.0 * kPI))
                     / REAL(corner.numFaces);
             corner.cosFaceAngle = std::cos(corner.faceAngle);
         }
@@ -1622,6 +1626,7 @@ namespace {
         }
     }
 
+#ifdef FAR_DEBUG_LOOP_PATCH_BUILDER
     void
     _printSourcePatch(SourcePatch const & patch, bool printCornerInfo = true,
                                                  bool printRingPoints = true) {
@@ -1654,6 +1659,7 @@ namespace {
             }
         }
     }
+#endif
 }
 
 

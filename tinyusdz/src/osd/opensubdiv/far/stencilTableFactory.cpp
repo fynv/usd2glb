@@ -22,6 +22,12 @@
 //   language governing permissions and limitations under the Apache License.
 //
 
+#ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES
+#endif
+#endif
+
 #include "../far/stencilTableFactory.h"
 #include "../far/stencilBuilder.h"
 #include "../far/patchTable.h"
@@ -100,10 +106,9 @@ StencilTableFactoryReal<REAL>::Create(TopologyRefiner const & refiner,
                                 /*compactWeights*/  true);
 
     //
-    // Interpolate stencils for each refinement level using
-    // PrimvarRefiner::InterpolateLevel<>() for vertex or varying
+    // Interpolate stencils for each refinement level
     //
-    PrimvarRefiner primvarRefiner(refiner);
+    PrimvarRefinerReal<REAL> primvarRefiner(refiner);
 
     typename StencilBuilder<REAL>::Index srcIndex(&builder, 0);
     typename StencilBuilder<REAL>::Index dstIndex(&builder, numControlVertices);

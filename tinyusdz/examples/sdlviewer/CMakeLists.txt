@@ -3,7 +3,11 @@ cmake_minimum_required(VERSION 3.5.1)
 
 set(BUILD_TARGET "usdz_view")
 
+if (APPLE)
+project(${BUILD_TARGET} CXX C OBJC OBJCXX)
+else()
 project(${BUILD_TARGET} CXX C)
+endif()
 
 option(TINYUSDZ_USE_CCACHE "Use ccache for faster recompile." ON)
 option(
@@ -114,7 +118,7 @@ function(ADD_SDL2_LIB)
   set(SDL_STATIC
       ON
       CACHE INTERNAL "" FORCE)
-  add_subdirectory(../common/SDL2-2.0.22/ SDL2)
+  add_subdirectory(../common/SDL2-2.24.0/ SDL2)
 endfunction()
 
 if(EMSCRIPTEN)
@@ -285,6 +289,9 @@ list(
   ../../src/crate-pprint.cc
   ../../src/audio-loader.cc
   ../../src/ascii-parser.cc
+  ../../src/ascii-parser-basetype.cc
+  ../../src/ascii-parser-timesamples.cc
+  ../../src/ascii-parser-timesamples-array.cc
   ../../src/usdc-reader.cc
   ../../src/usda-reader.cc
   #../../src/usda-writer.cc
@@ -297,7 +304,9 @@ list(
   ../../src/usdLux.cc
   ../../src/usdShade.cc
   ../../src/xform.cc
+  ../../src/stage.cc
   ../../src/tydra/render-data.cc
+  ../../src/tydra/scene-access.cc
 )
 
 set(TINYUSDZ_DEP_SOURCES
@@ -305,11 +314,11 @@ set(TINYUSDZ_DEP_SOURCES
     ../../src/lz4-compression.cc
     ../../src/lz4/lz4.c
     ../../src/external/pystring.cpp
-    ../../src/external/string_id/string_id.cpp
-    ../../src/external/string_id/database.cpp
-    ../../src/external/string_id/error.cpp
+    #../../src/external/string_id/string_id.cpp
+    #../../src/external/string_id/database.cpp
+    #../../src/external/string_id/error.cpp
     ../../src/external/fpng.cpp
-    ../../src/external/staticstruct.cc
+    #../../src/external/staticstruct.cc
     ../../src/external/tinyxml2/tinyxml2.cpp
     )
 

@@ -1,16 +1,590 @@
 #include <cstdio>
 #include <tinyusdz.hh>
+#include <usdShade.hh>
 #include <usda-writer.hh>
 
 #define TINYGLTF_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <tiny_gltf.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+
+
 #include <glm.hpp>
+#include <vector>
 #include <queue>
+#include <unordered_map>
+
+#include "Image.h"
+
+namespace Mid
+{
+	struct Material
+	{
+		std::string name;
+
+		glm::vec3 diffuse_color = glm::vec3(1.0f, 1.0f, 1.0f);
+		std::string diffuse_tex = "";
+
+		glm::vec3 emissive_color = glm::vec3(0.0f, 0.0f, 0.0f);
+		std::string emissive_tex = "";
+
+		float metallic = 0.0f;
+		std::string metallic_tex = "";
+
+		float roughness = 0.5f;
+		std::string roughness_tex = "";
+
+		std::string uvset = "";
+
+		int idx_metallic_roughness = -1;
+	};
+}
 
 int main(int argc, char* argv[])
+{
+	if (argc < 3)
+	{
+		printf("usd2glb input.usdc output.glb\n");
+		return 0;
+	}
+
+	std::string warn;
+	std::string err;
+
+	tinyusdz::Stage stage;
+	tinyusdz::USDLoadOptions options;
+	options.load_assets = false;
+	bool ret = tinyusdz::LoadUSDCFromFile(argv[1], &stage, &warn, &err, options);
+	if (!ret)
+	{
+		printf("%s\n", warn.c_str());
+		printf("%s\n", err.c_str());
+		return 0;
+	}
+
+	//tinyusdz::usda::SaveAsUSDA("output.udsa", stage, &warn, &err);
+
+	tinyusdz::Prim* root_prim = &stage.GetRootPrims()[0];
+
+	tinygltf::Model m_out;
+	m_out.scenes.resize(1);
+	tinygltf::Scene& scene_out = m_out.scenes[0];
+	scene_out.name = "Scene";
+
+	m_out.asset.version = "2.0";
+	m_out.asset.generator = "tinygltf";
+
+	m_out.buffers.resize(1);
+	tinygltf::Buffer& buf_out = m_out.buffers[0];
+
+	size_t offset = 0;
+	size_t length = 0;
+	size_t view_id = 0;
+	size_t acc_id = 0;
+
+	std::vector<Mid::Material> material_lst;
+	std::unordered_map<std::string, int> material_map;
+
+	struct Prim
+	{
+		tinyusdz::Prim* prim;
+		int id_node_base = -1;
+		std::string base_path;
+	};
+
+	std::queue<Prim> queue_prim;
+	queue_prim.push({ root_prim, -1, ""});
+
+	while (!queue_prim.empty())
+	{
+		Prim prim = queue_prim.front();
+		queue_prim.pop();
+		std::string path = prim.base_path + "/" + prim.prim->local_path().full_path_name();		
+
+		if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_GEOM_XFORM)
+		{
+			auto* node_in = prim.prim->data().as<tinyusdz::Xform>();
+			int node_id = (int)m_out.nodes.size();
+
+			tinygltf::Node node_out;
+			node_out.name = node_in->name;
+
+			tinyusdz::value::matrix4d matrix;
+			node_in->EvaluateXformOps(&matrix, nullptr, nullptr);
+			node_out.matrix.resize(16);
+			memcpy(node_out.matrix.data(), &matrix, sizeof(double) * 16);
+			m_out.nodes.push_back(node_out);
+			if (prim.id_node_base >= 0)
+			{
+				m_out.nodes[prim.id_node_base].children.push_back(node_id);
+			}
+			else
+			{
+				scene_out.nodes.push_back(node_id);
+			}
+			
+		}
+		else if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_MATERIAL)
+		{
+			Mid::Material material_mid;
+
+			auto* material_in = prim.prim->data().as<tinyusdz::Material>();
+			material_mid.name = material_in->name;
+			std::string outputs_surface = material_in->surface->target.value().GetPrimPart();			
+			const tinyusdz::Prim* pshader0 = stage.GetPrimAtPath(tinyusdz::Path(outputs_surface, "")).value();			
+			auto* shader0 = pshader0->data().as<tinyusdz::Shader>();
+			auto* surface = shader0->value.as<tinyusdz::UsdPreviewSurface>();
+			{
+				auto diffuse = surface->diffuseColor;
+				auto diffuse_connection = diffuse.GetConnection();
+				if (diffuse_connection.has_value())
+				{
+					std::string path = diffuse_connection.value().GetPrimPart();
+					const tinyusdz::Prim* pshader1 = stage.GetPrimAtPath(tinyusdz::Path(path, "")).value();
+					auto* shader1 = pshader1->data().as<tinyusdz::Shader>();
+					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
+					auto file = tex->file.GetValue().value().value;
+					material_mid.diffuse_tex = file.GetAssetPath();					
+
+					auto uv_connection = tex->st.GetConnection();
+					if (uv_connection.has_value())
+					{
+						std::string path_uv = uv_connection.value().GetPrimPart();
+						const tinyusdz::Prim* pshader2 = stage.GetPrimAtPath(tinyusdz::Path(path_uv, "")).value();
+						auto* shader2 = pshader2->data().as<tinyusdz::Shader>();
+						auto* uvset = shader2->value.as<tinyusdz::UsdPrimvarReader_float2>();
+						material_mid.uvset = uvset->varname.GetValue().value().value.str();					
+					}
+
+				}
+				else
+				{
+					auto col = diffuse.GetValue().value;
+					material_mid.diffuse_color = { col[0], col[1], col[2] };
+				}
+			}
+			{
+				auto emissive = surface->emissiveColor;
+				auto emissive_connection = emissive.GetConnection();
+				if (emissive_connection.has_value())
+				{
+					std::string path = emissive_connection.value().GetPrimPart();
+					const tinyusdz::Prim* pshader1 = stage.GetPrimAtPath(tinyusdz::Path(path, "")).value();
+					auto* shader1 = pshader1->data().as<tinyusdz::Shader>();
+					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
+					auto file = tex->file.GetValue().value().value;
+					material_mid.emissive_tex = file.GetAssetPath();
+				}
+				else
+				{
+					auto col = emissive.GetValue().value;
+					material_mid.emissive_color = { col[0], col[1], col[2] };
+				}
+			}
+			{
+				auto metallic = surface->metallic;
+				auto metallic_connection = metallic.GetConnection();
+				if (metallic_connection.has_value())
+				{
+					std::string path = metallic_connection.value().GetPrimPart();
+					const tinyusdz::Prim* pshader1 = stage.GetPrimAtPath(tinyusdz::Path(path, "")).value();
+					auto* shader1 = pshader1->data().as<tinyusdz::Shader>();
+					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
+					auto file = tex->file.GetValue().value().value;
+					material_mid.metallic_tex = file.GetAssetPath();
+				}
+				else
+				{
+					material_mid.metallic = metallic.GetValue().value;
+				}
+			}
+			{
+				auto roughness = surface->roughness;
+				auto roughness_connection = roughness.GetConnection();
+				if (roughness_connection.has_value())
+				{
+					std::string path = roughness_connection.value().GetPrimPart();
+					const tinyusdz::Prim* pshader1 = stage.GetPrimAtPath(tinyusdz::Path(path, "")).value();
+					auto* shader1 = pshader1->data().as<tinyusdz::Shader>();
+					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
+					auto file = tex->file.GetValue().value().value;
+					material_mid.roughness_tex = file.GetAssetPath();
+				}
+				else
+				{
+					material_mid.roughness = roughness.GetValue().value;
+				}
+
+			}
+
+			int idx = (int)material_lst.size();
+			material_lst.push_back(material_mid);
+			material_map[path] = idx;
+
+		}
+		else if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_GEOM_MESH)
+		{
+			auto* mesh_in = prim.prim->data().as<tinyusdz::GeomMesh>();
+			int node_id = (int)m_out.nodes.size();
+			int mesh_id = (int)m_out.meshes.size();
+
+			tinygltf::Node node_out;
+			node_out.name = mesh_in->name;
+			node_out.mesh = mesh_id;
+			m_out.nodes.push_back(node_out);
+
+			if (prim.id_node_base >= 0)
+			{
+				m_out.nodes[prim.id_node_base].children.push_back(node_id);
+			}
+			else
+			{
+				scene_out.nodes.push_back(node_id);
+			}
+
+			tinygltf::Mesh mesh_out;
+			mesh_out.name = node_out.name;
+			mesh_out.primitives.resize(1);
+
+			auto& prim_out = mesh_out.primitives[0];
+
+			prim_out.material = material_map[mesh_in->materialBinding.value().binding.full_path_name()];
+			
+			auto points = mesh_in->points.GetValue().value().value;
+			auto extent = mesh_in->extent.GetValue().value().value;
+
+			offset = buf_out.data.size();
+			length = points.size() * sizeof(glm::vec3);
+			buf_out.data.resize(offset + length);
+			memcpy(buf_out.data.data() + offset, points.data(), length);
+
+			view_id = m_out.bufferViews.size();
+			{
+				tinygltf::BufferView view;
+				view.buffer = 0;
+				view.byteOffset = offset;
+				view.byteLength = length;
+				view.target = TINYGLTF_TARGET_ARRAY_BUFFER;
+				m_out.bufferViews.push_back(view);
+			}
+
+			acc_id = m_out.accessors.size();
+			{
+				tinygltf::Accessor acc;
+				acc.bufferView = view_id;
+				acc.byteOffset = 0;
+				acc.type = TINYGLTF_TYPE_VEC3;
+				acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+				acc.count = points.size();
+				acc.minValues = { extent.lower[0], extent.lower[1], extent.lower[2] };
+				acc.maxValues = { extent.upper[0], extent.upper[1], extent.upper[2] };
+				m_out.accessors.push_back(acc);
+			}
+
+			prim_out.attributes["POSITION"] = acc_id;
+
+			auto norms = mesh_in->normals.GetValue().value().value;
+
+			offset = buf_out.data.size();
+			length = norms.size() * sizeof(glm::vec3);
+			buf_out.data.resize(offset + length);
+			memcpy(buf_out.data.data() + offset, norms.data(), length);
+
+			view_id = m_out.bufferViews.size();
+			{
+				tinygltf::BufferView view;
+				view.buffer = 0;
+				view.byteOffset = offset;
+				view.byteLength = length;
+				view.target = TINYGLTF_TARGET_ARRAY_BUFFER;
+				m_out.bufferViews.push_back(view);
+			}
+
+			acc_id = m_out.accessors.size();
+			{
+				tinygltf::Accessor acc;
+				acc.bufferView = view_id;
+				acc.byteOffset = 0;
+				acc.type = TINYGLTF_TYPE_VEC3;
+				acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+				acc.count = norms.size();				
+				m_out.accessors.push_back(acc);
+			}
+
+			prim_out.attributes["NORMAL"] = acc_id;
+
+			auto faceVertexIndices = mesh_in->faceVertexIndices.GetValue().value().value;
+			auto faceVertexCounts = mesh_in->faceVertexCounts.GetValue().value().value;
+
+			size_t idx_ind = 0;
+			std::vector<glm::ivec3> faces;
+			for (size_t i = 0; i < faceVertexCounts.size(); i++)
+			{
+				int count = faceVertexCounts[i];
+				if (count == 3)
+				{
+					glm::ivec3 face;
+					face.x = faceVertexIndices[idx_ind]; idx_ind++;
+					face.y = faceVertexIndices[idx_ind]; idx_ind++;
+					face.z = faceVertexIndices[idx_ind]; idx_ind++;
+					faces.push_back(face);
+				}
+				else if (count == 4)
+				{
+					glm::ivec3 face1;
+					face1.x = faceVertexIndices[idx_ind]; idx_ind++;
+					face1.y = faceVertexIndices[idx_ind]; idx_ind++;
+					face1.z = faceVertexIndices[idx_ind]; idx_ind++;
+					faces.push_back(face1);
+
+					glm::ivec3 face2;
+					face2.x = face1.z;
+					face2.y = faceVertexIndices[idx_ind]; idx_ind++;
+					face2.z = face1.x;
+					faces.push_back(face2);
+				}
+			}
+
+			offset = buf_out.data.size();
+			length = faces.size() * sizeof(glm::ivec3);
+			buf_out.data.resize(offset + length);
+			memcpy(buf_out.data.data() + offset, faces.data(), length);
+
+			view_id = m_out.bufferViews.size();
+			{
+				tinygltf::BufferView view;
+				view.buffer = 0;
+				view.byteOffset = offset;
+				view.byteLength = length;
+				view.target = TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER;
+				m_out.bufferViews.push_back(view);
+			}
+
+			acc_id = m_out.accessors.size();
+			{
+				tinygltf::Accessor acc;
+				acc.bufferView = view_id;
+				acc.byteOffset = 0;
+				acc.type = TINYGLTF_TYPE_SCALAR;
+				acc.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT;
+				acc.count = faces.size() * 3;
+				m_out.accessors.push_back(acc);
+			}
+
+			prim_out.indices = acc_id;
+
+
+			auto iter = mesh_in->props.find("primvars:st0");
+			if (iter != mesh_in->props.end())
+			{
+				auto st0 = iter->second.GetAttrib().get_value<std::vector<tinyusdz::value::float2>>().value();
+				
+				offset = buf_out.data.size();
+				length = st0.size() * sizeof(glm::vec2);
+				buf_out.data.resize(offset + length);
+				memcpy(buf_out.data.data() + offset, st0.data(), length);
+
+				float* p_uv = (float*)(buf_out.data.data() + offset);
+				for (size_t i = 0; i < st0.size(); i++)
+				{
+					p_uv[i * 2 + 1] = 1.0f - p_uv[i * 2 + 1];
+				}
+
+				view_id = m_out.bufferViews.size();
+				{
+					tinygltf::BufferView view;
+					view.buffer = 0;
+					view.byteOffset = offset;
+					view.byteLength = length;
+					view.target = TINYGLTF_TARGET_ARRAY_BUFFER;
+					m_out.bufferViews.push_back(view);
+				}
+
+				acc_id = m_out.accessors.size();
+				{
+					tinygltf::Accessor acc;
+					acc.bufferView = view_id;
+					acc.byteOffset = 0;
+					acc.type = TINYGLTF_TYPE_VEC2;
+					acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+					acc.count = st0.size();
+					m_out.accessors.push_back(acc);
+				}
+
+				prim_out.attributes["TEXCOORD_0"] = acc_id;
+			}
+
+			
+			prim_out.mode = TINYGLTF_MODE_TRIANGLES;
+			m_out.meshes.push_back(mesh_out);
+
+		}
+
+		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL)
+		{
+			int id_node_base = (int)(m_out.nodes.size() - 1);
+			size_t num_children = prim.prim->children().size();
+			for (size_t i = 0; i < num_children; i++)
+			{
+				queue_prim.push({ &prim.prim->children()[i],id_node_base, path });
+			}
+		}
+	}
+
+	// std::vector<std::string> tex_lst;
+	std::vector<Mid::Image> tex_lst;
+	std::unordered_map<std::string, int> tex_map;
+
+	for (size_t i = 0; i < material_lst.size(); i++)
+	{
+		auto& material = material_lst[i];
+		if (material.diffuse_tex!="")
+		{
+			auto& iter = tex_map.find(material.diffuse_tex);
+			if (iter == tex_map.end())
+			{
+				int idx = (int)tex_lst.size();
+				tex_lst.resize(idx + 1);
+
+				Mid::Image& img = tex_lst[idx];				
+				img.Load(material.diffuse_tex.c_str());
+			
+				tex_map[material.diffuse_tex] = idx;
+			}
+		}
+		if (material.emissive_tex != "")
+		{
+			auto& iter = tex_map.find(material.emissive_tex);
+			if (iter == tex_map.end())
+			{
+				int idx = (int)tex_lst.size();
+				tex_lst.resize(idx + 1);
+
+				Mid::Image& img = tex_lst[idx];				
+				img.Load(material.emissive_tex.c_str());
+
+				tex_map[material.emissive_tex] = idx;
+			}
+		}
+
+		if (material.metallic_tex != "" || material.roughness_tex != "")
+		{
+			Mid::Image img_metallic, img_roughness;
+			if (material.metallic_tex != "")
+			{
+				img_metallic.Load(material.metallic_tex.c_str());
+			}
+			if (material.roughness_tex != "")
+			{
+				img_roughness.Load(material.roughness_tex.c_str());
+			}
+
+			int idx = (int)tex_lst.size();
+			tex_lst.resize(idx + 1);
+
+			Mid::Image& img = tex_lst[idx];
+			img.CreateMR(img_metallic, img_roughness);
+
+			material.idx_metallic_roughness = idx;
+
+		}		
+	}
+
+	m_out.samplers.resize(1);
+	tinygltf::Sampler& sampler = m_out.samplers[0];
+	sampler.minFilter = TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR;
+	sampler.magFilter = TINYGLTF_TEXTURE_FILTER_LINEAR;
+
+	m_out.images.resize(tex_lst.size());
+	m_out.textures.resize(tex_lst.size());
+	for (size_t i = 0; i < tex_lst.size(); i++)
+	{
+		Mid::Image& img_mid = tex_lst[i];
+		tinygltf::Image& img_out = m_out.images[i];
+		tinygltf::Texture& tex_out = m_out.textures[i];
+
+		std::string ext = img_mid.filename.substr(img_mid.filename.find_last_of(".") + 1);
+		std::string mimeType = "image/jpeg";
+		if (ext == "png" || ext == "PNG")
+		{
+			mimeType = "image/png";
+		}
+
+		length = img_mid.code.size();
+		offset = buf_out.data.size();
+		buf_out.data.resize(offset + length);
+		memcpy(buf_out.data.data() + offset, img_mid.code.data(), length);
+
+		img_out.width = img_mid.width;
+		img_out.height = img_mid.height;
+		img_out.component = 4;
+		img_out.bits = 8;
+		img_out.pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+		img_out.mimeType = mimeType;
+
+		view_id = m_out.bufferViews.size();
+		{
+			tinygltf::BufferView view;
+			view.buffer = 0;
+			view.byteOffset = offset;
+			view.byteLength = length;
+			m_out.bufferViews.push_back(view);
+		}
+		img_out.bufferView = view_id;
+
+		tex_out.sampler = 0;
+		tex_out.source = i;
+
+	}
+
+	m_out.materials.resize(material_lst.size());
+	for (size_t i = 0; i < material_lst.size(); i++)
+	{
+		auto& material_mid = material_lst[i];
+		tinygltf::Material& material_out = m_out.materials[i];
+		material_out.name = material_mid.name;
+		material_out.doubleSided = true;
+		
+		if (material_mid.diffuse_tex != "")
+		{
+			material_out.pbrMetallicRoughness.baseColorTexture.index = tex_map[material_mid.diffuse_tex];
+		}
+		else
+		{
+			material_out.pbrMetallicRoughness.baseColorFactor = { material_mid.diffuse_color[0], material_mid.diffuse_color[1], material_mid.diffuse_color[2], 1.0f };
+		}
+
+		if (material_mid.emissive_tex != "")
+		{
+			material_out.emissiveTexture.index = tex_map[material_mid.diffuse_tex];
+		}
+		else
+		{
+			material_out.emissiveFactor = { material_mid.emissive_color[0], material_mid.emissive_color[1], material_mid.emissive_color[2] };
+		}
+
+		if (material_mid.idx_metallic_roughness >= 0)
+		{
+			material_out.pbrMetallicRoughness.metallicRoughnessTexture.index = material_mid.idx_metallic_roughness;
+			material_out.pbrMetallicRoughness.metallicFactor = 1.0f;
+			material_out.pbrMetallicRoughness.roughnessFactor = 1.0f;
+		}
+		else
+		{
+			material_out.pbrMetallicRoughness.metallicFactor = material_mid.metallic;
+			material_out.pbrMetallicRoughness.roughnessFactor = material_mid.roughness;
+		}
+	}
+
+	tinygltf::TinyGLTF gltf;
+	gltf.WriteGltfSceneToFile(&m_out, argv[2], true, true, false, true);
+
+	return 0;
+}
+
+
+/*int main(int argc, char* argv[])
 {
 	if (argc < 3)
 	{
@@ -74,16 +648,10 @@ int main(int argc, char* argv[])
 			tinygltf::Node node_out;
 			node_out.name = node_in->name;	
 
-			size_t num_ops = node_in->xformOps.size();
-			if (num_ops > 0)
-			{
-				if (node_in->xformOps[0].op == tinyusdz::XformOp::OpType::Translate
-					&& node_in->xformOps[0].suffix=="")
-				{
-					auto trans = node_in->xformOps[0].get_scalar_value<tinyusdz::value::double3>().value();
-					node_out.translation = { trans[0], trans[1], trans[2] };
-				}
-			}			
+			tinyusdz::value::matrix4d matrix;
+			node_in->EvaluateXformOps(&matrix, nullptr, nullptr);
+			node_out.matrix.resize(16);
+			memcpy(node_out.matrix.data(), &matrix, sizeof(double) * 16);
 
 			m_out.nodes.push_back(node_out);
 			if (prim.id_node_base >= 0)
@@ -128,7 +696,7 @@ int main(int argc, char* argv[])
 				auto iter = mesh_in->props.find("primvars:displayColor");
 				if (iter != mesh_in->props.end())
 				{
-					auto col = iter->second.attrib.get_value<std::vector<tinyusdz::value::float3>>().value()[0];
+					auto col = iter->second.GetAttrib().get_value<std::vector<tinyusdz::value::float3>>().value()[0];
 					material_out.pbrMetallicRoughness.baseColorFactor = { col[0], col[1], col[2], 1.0f };
 				}
 				m_out.materials.push_back(material_out);
@@ -243,4 +811,7 @@ int main(int argc, char* argv[])
 	gltf.WriteGltfSceneToFile(&m_out, argv[2], true, true, false, true);
 
 	return 0;
-}
+}*/
+
+
+

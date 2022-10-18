@@ -13,14 +13,12 @@
 namespace tinyusdz {
 namespace prim {
 
-using PropertyMap = std::map<std::string, Property>;
-using ReferenceList = std::vector<std::pair<ListEditQual, Reference>>;
-
 
 ///
 /// Reconstruct property with `xformOp:***` namespace in `properties` to `XformOp` class.
 /// Corresponding property are looked up from names in `xformOpOrder`(`token[]`) property.
 /// Name of processed xformOp properties are added to `table`
+/// TODO: Move to prim-reconstruct.cc?
 ///
 bool ReconstructXformOpsFromProperties(
       std::set<std::string> &table, /* inout */

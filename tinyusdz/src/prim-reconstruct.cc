@@ -33,6 +33,8 @@
 namespace tinyusdz {
 namespace prim {
 
+constexpr auto kTag = "[PrimReconstruct]";
+
 constexpr auto kProxyPrim = "proxyPrim";
 constexpr auto kMaterialBinding = "material:binding";
 constexpr auto kSkelSkeleton = "skel:skeleton";
@@ -133,7 +135,7 @@ nonstd::optional<Animatable<Extent>> ConvertToAnimatable(const primvar::PrimVar 
 
         dst.value = ext;
         dst.blocked = false;
-      
+
       } else {
         return nonstd::nullopt;
       }
@@ -192,7 +194,7 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(propname);
         ret.code = ParseResult::ResultCode::Success;
         DCOUT("Added as property with connection: " << propname);
@@ -217,7 +219,7 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(prop_name);
         ret.code = ParseResult::ResultCode::Success;
         return ret;
@@ -228,18 +230,18 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       }
     }
 
-    const PrimAttrib &attr = prop.attrib;
+    const PrimAttrib &attr = prop.GetAttrib();
 
     std::string attr_type_name = attr.type_name();
-    if ((value::TypeTrait<T>::type_name() == attr_type_name) || (value::TypeTrait<T>::underlying_type_name() == attr_type_name)) {
-      if (prop.type == Property::Type::EmptyAttrib) {
+    if ((value::TypeTraits<T>::type_name() == attr_type_name) || (value::TypeTraits<T>::underlying_type_name() == attr_type_name)) {
+      if (prop.GetPropertyType() == Property::Type::EmptyAttrib) {
         DCOUT("Added prop with empty value: " << name);
         target.SetValueEmpty();
         target.meta = attr.meta;
         table.insert(name);
         ret.code = ParseResult::ResultCode::Success;
         return ret;
-      } else if (prop.type == Property::Type::Attrib) {
+      } else if (prop.GetPropertyType() == Property::Type::Attrib) {
 
         DCOUT("Adding typed prop: " << name);
 
@@ -301,11 +303,11 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
         return ret;
       }
     } else {
-      DCOUT("tyname = " << value::TypeTrait<T>::type_name() << ", attr.type = " << attr_type_name);
+      DCOUT("tyname = " << value::TypeTraits<T>::type_name() << ", attr.type = " << attr_type_name);
       ret.code = ParseResult::ResultCode::TypeMismatch;
       std::stringstream ss;
       ss  << "Property type mismatch. " << name << " expects type `"
-              << value::TypeTrait<T>::type_name()
+              << value::TypeTraits<T>::type_name()
               << "` but defined as type `" << attr_type_name << "`";
       ret.err = ss.str();
       return ret;
@@ -337,7 +339,7 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(propname);
         ret.code = ParseResult::ResultCode::Success;
         DCOUT("Added as property with connection: " << propname);
@@ -362,7 +364,7 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(prop_name);
         ret.code = ParseResult::ResultCode::Success;
         return ret;
@@ -373,21 +375,21 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       }
     }
 
-    const PrimAttrib &attr = prop.attrib;
+    const PrimAttrib &attr = prop.GetAttrib();
 
     std::string attr_type_name = attr.type_name();
-    if ((value::TypeTrait<T>::type_name() == attr_type_name) || (value::TypeTrait<T>::underlying_type_name() == attr_type_name)) {
-      if (prop.type == Property::Type::EmptyAttrib) {
+    if ((value::TypeTraits<T>::type_name() == attr_type_name) || (value::TypeTraits<T>::underlying_type_name() == attr_type_name)) {
+      if (prop.GetPropertyType() == Property::Type::EmptyAttrib) {
         DCOUT("Added prop with empty value: " << name);
         target.SetValueEmpty();
         target.meta = attr.meta;
         table.insert(name);
         ret.code = ParseResult::ResultCode::Success;
         return ret;
-      } else if (prop.type == Property::Type::Attrib) {
+      } else if (prop.GetPropertyType() == Property::Type::Attrib) {
         DCOUT("Adding prop: " << name);
 
-        if (prop.attrib.variability != Variability::Uniform) {
+        if (prop.GetAttrib().variability != Variability::Uniform) {
           ret.code = ParseResult::ResultCode::VariabilityMismatch;
           ret.err = fmt::format("Attribute `{}` must be `uniform` variability.", name);
           return ret;
@@ -420,11 +422,11 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
         return ret;
       }
     } else {
-      DCOUT("tyname = " << value::TypeTrait<T>::type_name() << ", attr.type = " << attr_type_name);
+      DCOUT("tyname = " << value::TypeTraits<T>::type_name() << ", attr.type = " << attr_type_name);
       ret.code = ParseResult::ResultCode::TypeMismatch;
       std::stringstream ss;
       ss  << "Property type mismatch. " << name << " expects type `"
-              << value::TypeTrait<T>::type_name()
+              << value::TypeTraits<T>::type_name()
               << "` but defined as type `" << attr_type_name << "`";
       ret.err = ss.str();
       return ret;
@@ -456,7 +458,7 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(propname);
         ret.code = ParseResult::ResultCode::Success;
         DCOUT("Added as property with connection: " << propname);
@@ -481,7 +483,7 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(prop_name);
         ret.code = ParseResult::ResultCode::Success;
         return ret;
@@ -492,18 +494,18 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       }
     }
 
-    const PrimAttrib &attr = prop.attrib;
+    const PrimAttrib &attr = prop.GetAttrib();
 
     std::string attr_type_name = attr.type_name();
-    if ((value::TypeTrait<T>::type_name() == attr_type_name) || (value::TypeTrait<T>::underlying_type_name() == attr_type_name)) {
-      if (prop.type == Property::Type::EmptyAttrib) {
+    if ((value::TypeTraits<T>::type_name() == attr_type_name) || (value::TypeTraits<T>::underlying_type_name() == attr_type_name)) {
+      if (prop.GetPropertyType() == Property::Type::EmptyAttrib) {
         DCOUT("Added prop with empty value: " << name);
         target.SetValueEmpty();
         target.meta = attr.meta;
         table.insert(name);
         ret.code = ParseResult::ResultCode::Success;
         return ret;
-      } else if (prop.type == Property::Type::Attrib) {
+      } else if (prop.GetPropertyType() == Property::Type::Attrib) {
 
         DCOUT("Adding typed attribute: " << name);
 
@@ -567,11 +569,11 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
         return ret;
       }
     } else {
-      DCOUT("tyname = " << value::TypeTrait<T>::type_name() << ", attr.type = " << attr_type_name);
+      DCOUT("tyname = " << value::TypeTraits<T>::type_name() << ", attr.type = " << attr_type_name);
       ret.code = ParseResult::ResultCode::TypeMismatch;
       std::stringstream ss;
       ss  << "Property type mismatch. " << name << " expects type `"
-              << value::TypeTrait<T>::type_name()
+              << value::TypeTraits<T>::type_name()
               << "` but defined as type `" << attr_type_name << "`";
       ret.err = ss.str();
       return ret;
@@ -605,7 +607,7 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(propname);
         ret.code = ParseResult::ResultCode::Success;
         DCOUT("Added as property with connection: " << propname);
@@ -631,7 +633,7 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(prop_name);
         ret.code = ParseResult::ResultCode::Success;
         return ret;
@@ -642,23 +644,23 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
       }
     }
 
-    const PrimAttrib &attr = prop.attrib;
+    const PrimAttrib &attr = prop.GetAttrib();
 
     std::string attr_type_name = attr.type_name();
     DCOUT(fmt::format("prop name {}, type = {}", prop_name, attr_type_name));
-    if ((value::TypeTrait<T>::type_name() == attr_type_name) || (value::TypeTrait<T>::underlying_type_name() == attr_type_name)) {
-      if (prop.type == Property::Type::EmptyAttrib) {
+    if ((value::TypeTraits<T>::type_name() == attr_type_name) || (value::TypeTraits<T>::underlying_type_name() == attr_type_name)) {
+      if (prop.GetPropertyType() == Property::Type::EmptyAttrib) {
         DCOUT("Added prop with empty value: " << name);
         target.SetValueEmpty();
         target.meta = attr.meta;
         table.insert(name);
         ret.code = ParseResult::ResultCode::Success;
         return ret;
-      } else if (prop.type == Property::Type::Attrib) {
+      } else if (prop.GetPropertyType() == Property::Type::Attrib) {
 
         DCOUT("Adding typed attribute: " << name);
 
-        if (prop.attrib.variability != Variability::Uniform) {
+        if (prop.GetAttrib().variability != Variability::Uniform) {
           ret.code = ParseResult::ResultCode::VariabilityMismatch;
           ret.err = fmt::format("Attribute `{}` must be `uniform` variability.", name);
           return ret;
@@ -691,11 +693,11 @@ static ParseResult ParseTypedAttribute(std::set<std::string> &table, /* inout */
         return ret;
       }
     } else {
-      DCOUT("tyname = " << value::TypeTrait<T>::type_name() << ", attr.type = " << attr_type_name);
+      DCOUT("tyname = " << value::TypeTraits<T>::type_name() << ", attr.type = " << attr_type_name);
       ret.code = ParseResult::ResultCode::TypeMismatch;
       std::stringstream ss;
       ss  << "Property type mismatch. " << name << " expects type `"
-              << value::TypeTrait<T>::type_name()
+              << value::TypeTraits<T>::type_name()
               << "` but defined as type `" << attr_type_name << "`";
       ret.err = ss.str();
       return ret;
@@ -727,7 +729,7 @@ static ParseResult ParseExtentAttribute(std::set<std::string> &table, /* inout *
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(propname);
         ret.code = ParseResult::ResultCode::Success;
         DCOUT("Added as property with connection: " << propname);
@@ -752,7 +754,7 @@ static ParseResult ParseExtentAttribute(std::set<std::string> &table, /* inout *
       if (auto pv = prop.GetConnectionTarget()) {
         target.SetConnection(pv.value());
         //target.variability = prop.attrib.variability;
-        target.meta = prop.attrib.meta;
+        target.meta = prop.GetAttrib().meta;
         table.insert(prop_name);
         ret.code = ParseResult::ResultCode::Success;
         return ret;
@@ -763,17 +765,17 @@ static ParseResult ParseExtentAttribute(std::set<std::string> &table, /* inout *
       }
     }
 
-    const PrimAttrib &attr = prop.attrib;
+    const PrimAttrib &attr = prop.GetAttrib();
 
     std::string attr_type_name = attr.type_name();
-    if (prop.type == Property::Type::EmptyAttrib) {
+    if (prop.GetPropertyType() == Property::Type::EmptyAttrib) {
       DCOUT("Added prop with empty value: " << name);
       target.SetValueEmpty();
       target.meta = attr.meta;
       table.insert(name);
       ret.code = ParseResult::ResultCode::Success;
       return ret;
-    } else if (prop.type == Property::Type::Attrib) {
+    } else if (prop.GetPropertyType() == Property::Type::Attrib) {
 
       DCOUT("Adding typed attribute: " << name);
 
@@ -906,11 +908,11 @@ static ParseResult ParseTypedProperty(std::set<std::string> &table, /* inout */
 
     } else if (prop.IsAttrib()) {
 
-      DCOUT("attrib.type = " << value::TypeTrait<T>::type_name() << ", attr.var.type= " << attr.type_name());
+      DCOUT("attrib.type = " << value::TypeTraits<T>::type_name() << ", attr.var.type= " << attr.type_name());
 
       std::string attr_type_name = attr.type_name();
 
-      if ((value::TypeTrait<T>::type_name() == attr_type_name) || (value::TypeTrait<T>::underlying_type_name() == attr_type_name)) {
+      if ((value::TypeTraits<T>::type_name() == attr_type_name) || (value::TypeTraits<T>::underlying_type_name() == attr_type_name)) {
         if (prop.type == Property::Type::EmptyAttrib) {
           target.define_only = true;
           target.variability = attr.variability;
@@ -950,11 +952,11 @@ static ParseResult ParseTypedProperty(std::set<std::string> &table, /* inout */
           return ret;
         }
       } else {
-        DCOUT("tyname = " << value::TypeTrait<T>::type_name() << ", attr.type = " << attr_type_name);
+        DCOUT("tyname = " << value::TypeTraits<T>::type_name() << ", attr.type = " << attr_type_name);
         ret.code = ParseResult::ResultCode::TypeMismatch;
         std::stringstream ss;
         ss  << "Property type mismatch. " << name << " expects type `"
-                << value::TypeTrait<T>::type_name()
+                << value::TypeTraits<T>::type_name()
                 << "` but defined as type `" << attr_type_name << "`";
         ret.err = ss.str();
         return ret;
@@ -1025,14 +1027,14 @@ static ParseResult ParseShaderOutputTerminalAttribute(std::set<std::string> &tab
       return ret;
     } else {
 
-      const PrimAttrib &attr = prop.attrib;
+      const PrimAttrib &attr = prop.GetAttrib();
 
       std::string attr_type_name = attr.type_name();
-      if (value::TypeTrait<T>::type_name() == attr_type_name) {
-        if (prop.type == Property::Type::EmptyAttrib) {
+      if (value::TypeTraits<T>::type_name() == attr_type_name) {
+        if (prop.GetPropertyType() == Property::Type::EmptyAttrib) {
           // OK
           target.SetAuthor(true);
-          target.meta = prop.attrib.meta;
+          target.meta = prop.GetAttrib().meta;
           table.insert(name);
           ret.code = ParseResult::ResultCode::Success;
           return ret;
@@ -1045,7 +1047,7 @@ static ParseResult ParseShaderOutputTerminalAttribute(std::set<std::string> &tab
       } else {
         DCOUT("attr.type = " << attr_type_name);
         ret.code = ParseResult::ResultCode::TypeMismatch;
-        ret.err = fmt::format("Property type mismatch. {} expects type `{}` but defined as type `{}`.", name, value::TypeTrait<T>::type_name(), attr_type_name);
+        ret.err = fmt::format("Property type mismatch. {} expects type `{}` but defined as type `{}`.", name, value::TypeTraits<T>::type_name(), attr_type_name);
         return ret;
       }
     }
@@ -1075,7 +1077,7 @@ static ParseResult ParseShaderOutputProperty(std::set<std::string> &table, /* in
     if (auto pv = prop.GetConnectionTarget()) {
       Relation rel;
       rel.Set(pv.value());
-      rel.meta = prop.attrib.meta;
+      rel.meta = prop.GetAttrib().meta;
       target = rel;
       table.insert(propname);
       ret.code = ParseResult::ResultCode::Success;
@@ -1091,7 +1093,7 @@ static ParseResult ParseShaderOutputProperty(std::set<std::string> &table, /* in
       if (auto pv = prop.GetConnectionTarget()) {
         Relation rel;
         rel.Set(pv.value());
-        rel.meta = prop.attrib.meta;
+        rel.meta = prop.GetAttrib().meta;
         target = rel;
         table.insert(prop_name);
         ret.code = ParseResult::ResultCode::Success;
@@ -1103,14 +1105,14 @@ static ParseResult ParseShaderOutputProperty(std::set<std::string> &table, /* in
       }
     } else {
 
-      const PrimAttrib &attr = prop.attrib;
+      const PrimAttrib &attr = prop.GetAttrib();
 
       std::string attr_type_name = attr.type_name();
-      if (value::TypeTrait<value::token>::type_name() == attr_type_name) {
-        if (prop.type == Property::Type::EmptyAttrib) {
+      if (value::TypeTraits<value::token>::type_name() == attr_type_name) {
+        if (prop.GetPropertyType() == Property::Type::EmptyAttrib) {
           Relation rel;
           rel.SetEmpty();
-          rel.meta = prop.attrib.meta;
+          rel.meta = prop.GetAttrib().meta;
           table.insert(name);
           target = rel;
           ret.code = ParseResult::ResultCode::Success;
@@ -1207,7 +1209,7 @@ static ParseResult ParseShaderInputConnectionProperty(std::set<std::string> &tab
     if (prop.second.IsRel() && prop.second.IsEmpty()) { \
       PUSH_ERROR_AND_RETURN(fmt::format("`{}` must be a Relation with Path target.", kProxyPrim)); \
     } \
-    const Relation &rel = prop.second.rel; \
+    const Relation &rel = prop.second.GetRelation(); \
     if (rel.IsPath()) { \
       __ptarget->proxyPrim = rel; \
       table.insert(prop.first); \
@@ -1227,7 +1229,7 @@ static ParseResult ParseShaderInputConnectionProperty(std::set<std::string> &tab
     if (prop.second.IsRel() && prop.second.IsEmpty()) { \
       PUSH_ERROR_AND_RETURN(fmt::format("`{}` must be a Relation with Path target.", kMaterialBinding)); \
     } \
-    const Relation &rel = prop.second.rel; \
+    const Relation &rel = prop.second.GetRelation(); \
     if (rel.IsPath()) { \
       MaterialBindingAPI m; \
       m.binding = rel.targetPath; \
@@ -1235,6 +1237,16 @@ static ParseResult ParseShaderInputConnectionProperty(std::set<std::string> &tab
       table.insert(prop.first); \
       DCOUT("Added rel material:binding."); \
       continue; \
+    } else if (rel.IsPathVector()) { \
+      if (rel.targetPathVector.size() == 1) { \
+        MaterialBindingAPI m; \
+        m.binding = rel.targetPathVector[0]; \
+        __ptarget->materialBinding = m; \
+        table.insert(prop.first); \
+        DCOUT("Added rel material:binding."); \
+        continue; \
+      } \
+      PUSH_ERROR_AND_RETURN(fmt::format("`{}` target is empty or has mutiple Paths. Must be single Path.", kMaterialBinding)); \
     } else { \
       PUSH_ERROR_AND_RETURN(fmt::format("`{}` target must be Path.", kMaterialBinding)); \
     } \
@@ -1248,11 +1260,18 @@ static ParseResult ParseShaderInputConnectionProperty(std::set<std::string> &tab
     if (prop.second.IsRel() && prop.second.IsEmpty()) { \
       PUSH_ERROR_AND_RETURN(fmt::format("`{}` must be a Relation with Path target.", kSkelSkeleton)); \
     } \
-    const Relation &rel = prop.second.rel; \
+    const Relation &rel = prop.second.GetRelation(); \
     if (rel.IsPath()) { \
       __ptarget->skeleton = rel.targetPath; \
       table.insert(prop.first); \
       continue; \
+    } else if (rel.IsPathVector()) { \
+      if (rel.targetPathVector.size() == 1) { \
+        __ptarget->skeleton = rel.targetPathVector[0]; \
+        table.insert(prop.first); \
+        continue; \
+      } \
+      PUSH_ERROR_AND_RETURN(fmt::format("`{}` target is empty or has mutiple Paths. Must be single Path.", kSkelSkeleton)); \
     } else { \
       PUSH_ERROR_AND_RETURN(fmt::format("`{}` target must be Path.", kSkelSkeleton)); \
     } \
@@ -1422,7 +1441,7 @@ nonstd::expected<bool, std::string> ParseEnumProperty(
         (*result) = e.value();
         return true;
       } else {
-        return nonstd::make_unexpected(fmt::format("({}) {}", value::TypeTrait<T>::type_name(), e.error()));
+        return nonstd::make_unexpected(fmt::format("({}) {}", value::TypeTraits<T>::type_name(), e.error()));
       }
     } else {
       return nonstd::make_unexpected(fmt::format("Property `{}` must be type `token`, but got type `{}`", prop_name, attr.type_name()));
@@ -1439,7 +1458,7 @@ nonstd::expected<bool, std::string> ParseEnumProperty(
           (*result) = e.value();
           return true;
         } else {
-          return nonstd::make_unexpected(fmt::format("({}) {}", value::TypeTrait<T>::type_name(), e.error()));
+          return nonstd::make_unexpected(fmt::format("({}) {}", value::TypeTraits<T>::type_name(), e.error()));
         }
       } else {
         return nonstd::make_unexpected(fmt::format("Property `{}` must be type `token`, but got type `{}`", prop_name, attr.type_name()));
@@ -1475,7 +1494,7 @@ nonstd::expected<bool, std::string> ParseEnumProperty(
           if (e) {
             samples.AddSample(sample_time, e.value());
           } else {
-            return nonstd::make_unexpected(fmt::format("({}) {}", value::TypeTrait<T>::type_name(), e.error()));
+            return nonstd::make_unexpected(fmt::format("({}) {}", value::TypeTraits<T>::type_name(), e.error()));
           }
         } else {
           return nonstd::make_unexpected(fmt::format("Property `{}`'s TimeSample value must be type `token`, but got invalid type", prop_name));
@@ -1501,7 +1520,7 @@ nonstd::expected<bool, std::string> ParseEnumProperty(
                            __target) {                                      \
   if (__prop.first == __name) {                                              \
     if (__table.count(__name)) { continue; } \
-    const PrimAttrib &attr = __prop.second.attrib;                           \
+    const PrimAttrib &attr = __prop.second.GetAttrib();                           \
     if (auto tok = attr.get_value<value::token>()) {                     \
       auto e = __enum_handler(tok.value().str());                            \
       if (e) {                                                               \
@@ -1509,11 +1528,11 @@ nonstd::expected<bool, std::string> ParseEnumProperty(
         /* TODO: attr meta __target.meta = attr.meta;  */                    \
         __table.insert(__name);                                              \
       } else {                                                               \
-        PUSH_ERROR_AND_RETURN("(" << value::TypeTrait<__klass>::type_name()  \
+        PUSH_ERROR_AND_RETURN("(" << value::TypeTraits<__klass>::type_name()  \
                                   << ") " << e.error());                     \
       }                                                                      \
     } else {                                                                 \
-      PUSH_ERROR_AND_RETURN("(" << value::TypeTrait<__klass>::type_name()    \
+      PUSH_ERROR_AND_RETURN("(" << value::TypeTraits<__klass>::type_name()    \
                                 << ") Property type mismatch. " << __name    \
                                 << " must be type `token`, but got `"        \
                                 << attr.type_name() << "`.");            \
@@ -1625,10 +1644,10 @@ bool ReconstructXformOpsFromProperties(
     if (prop.IsRel()) {
       PUSH_ERROR_AND_RETURN("Relation for `xformOpOrder` is not supported.");
     } else if (auto pv =
-                   prop.attrib.get_value<std::vector<value::token>>()) {
+                   prop.GetAttrib().get_value<std::vector<value::token>>()) {
 
       // 'uniform' check
-      if (prop.attrib.variability != Variability::Uniform) {
+      if (prop.GetAttrib().variability != Variability::Uniform) {
         PUSH_ERROR_AND_RETURN("`xformOpOrder` must have `uniform` variability.");
       }
 
@@ -1677,7 +1696,7 @@ bool ReconstructXformOpsFromProperties(
               "`" +
               tok + "`");
         }
-        const PrimAttrib &attr = it->second.attrib;
+        const PrimAttrib &attr = it->second.GetAttrib();
 
         // Check `xformOp` namespace
         if (auto xfm = SplitXformOpToken(tok, kTransform)) {
@@ -1898,10 +1917,11 @@ bool ReconstructXformOpsFromProperties(
     } else {
       PUSH_ERROR_AND_RETURN(
           "`xformOpOrder` must be type `token[]` but got type `"
-          << prop.attrib.type_name() << "`.");
+          << prop.GetAttrib().type_name() << "`.");
     }
   }
 
+  table.insert("xformOpOrder");
   return true;
 }
 
@@ -1914,15 +1934,19 @@ bool ReconstructPrim(
     std::string *warn,
     std::string *err) {
 
+  (void)references;
   (void)warn;
 
+#if 0 // TODO
   //
   // Resolve prepend references
   //
-  for (const auto &ref : references) {
-    if (std::get<0>(ref) == tinyusdz::ListEditQual::Prepend) {
+  if (std::get<0>(references) == ListEditQual::Prepend) {
+    for (const auto &ref : std::get<1>(references)) {
+      (void)ref;
     }
   }
+#endif
 
   std::set<std::string> table;
   if (!prim::ReconstructXformOpsFromProperties(table, properties, &xform->xformOps, err)) {
@@ -1934,14 +1958,17 @@ bool ReconstructPrim(
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
+#if 0 // TODO
   //
   // Resolve append references
   // (Overwrite variables with the referenced one).
   //
-  for (const auto &ref : references) {
-    if (std::get<0>(ref) == tinyusdz::ListEditQual::Append) {
+  if (std::get<0>(references) == ListEditQual::Append) {
+    for (const auto &ref : std::get<1>(references)) {
+      (void)ref;
     }
   }
+#endif
 
   return true;
 }
@@ -1953,7 +1980,7 @@ bool ReconstructPrim<Model>(
     Model *model,
     std::string *warn,
     std::string *err) {
-  DCOUT("Model(`def` with no type)");
+  DCOUT("Model ");
   (void)references;
   (void)model;
   (void)err;
@@ -2012,6 +2039,11 @@ bool ReconstructPrim<SkelRoot>(
   // custom props only
   for (const auto &prop : properties) {
     ADD_PROPERTY(table, prop, SkelRoot, root->props)
+    PARSE_ENUM_PROPETY(table, prop, "visibility", VisibilityEnumHandler, SkelRoot,
+                   root->visibility)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, SkelRoot,
+                       root->purpose)
+    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", SkelRoot, root->extent)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
@@ -2036,9 +2068,9 @@ bool ReconstructPrim<Skeleton>(
     if (prop.first == kSkelAnimationSource) {
 
       // Must be relation of type Path.
-      if (prop.second.IsRel() && prop.second.rel.IsPath()) {
+      if (prop.second.IsRel() && prop.second.GetRelation().IsPath()) {
         {
-          const Relation &rel = prop.second.rel;
+          const Relation &rel = prop.second.GetRelation();
           if (rel.IsPath()) {
             DCOUT(kSkelAnimationSource);
             skel->animationSource = rel.targetPath;
@@ -2059,8 +2091,45 @@ bool ReconstructPrim<Skeleton>(
     PARSE_TYPED_ATTRIBUTE(table, prop, "joints", Skeleton, skel->joints)
     PARSE_TYPED_ATTRIBUTE(table, prop, "jointNames", Skeleton, skel->jointNames)
     PARSE_TYPED_ATTRIBUTE(table, prop, "restTransforms", Skeleton, skel->restTransforms)
+    PARSE_ENUM_PROPETY(table, prop, "visibility", VisibilityEnumHandler, Skeleton,
+                   skel->visibility)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, Skeleton,
+                       skel->purpose)
+    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", Skeleton, skel->extent)
     ADD_PROPERTY(table, prop, Skeleton, skel->props)
     PARSE_PROPERTY_END_MAKE_ERROR(table, prop)
+  }
+
+  // usdview and Houdini USD importer expects both `bindTransforms` and `restTransforms` are authored in USD
+  if (!table.count("bindTransforms")) {
+    // usdview and Houdini allow `bindTransforms` is not authord in USD, but it cannot compute skinning correctly without it,
+    // so report an error in TinyUSDZ for a while.
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "`bindTransforms` is missing in Skeleton. Currently TinyUSDZ expects `bindTransforms` must exist in Skeleton.");
+  }
+
+  if (!table.count("restTransforms")) {
+    // usdview and Houdini allow `restTransforms` is not authord in USD(usdview warns it), but it cannot compute skinning correctly without it,
+    // (even SkelAnimation supplies trasnforms for all joints)
+    // so report an error in TinyUSDZ for a while.
+    PUSH_ERROR_AND_RETURN_TAG(kTag, "`restTransforms`(local joint matrices at rest state) is missing in Skeleton. Currently TinyUSDZ expects `restTransforms` must exist in Skeleton.");
+  }
+
+  // len(bindTransforms) must be equal to len(restTransforms)
+  // TODO: Support connection
+  {
+    bool valid = false;
+    if (auto bt = skel->bindTransforms.GetValue()) {
+      if (auto rt = skel->restTransforms.GetValue()) {
+        if (bt.value().size() == rt.value().size()) {
+          // ok
+          valid = true;
+        }
+      }
+    }
+
+    if (!valid) {
+      PUSH_ERROR_AND_RETURN_TAG(kTag, "Array length must be same for `bindTransforms` and `restTransforms`.");
+    }
   }
 
   return true;
@@ -2228,10 +2297,10 @@ bool ReconstructPrim(
 }
 
 template <>
-bool ReconstructPrim<LuxSphereLight>(
+bool ReconstructPrim<SphereLight>(
     const PropertyMap &properties,
     const ReferenceList &references,
-    LuxSphereLight *light,
+    SphereLight *light,
     std::string *warn,
     std::string *err) {
 
@@ -2245,14 +2314,16 @@ bool ReconstructPrim<LuxSphereLight>(
 
   for (const auto &prop : properties) {
     // PARSE_PROPERTY(prop, "inputs:colorTemperature", light->colorTemperature)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:color", LuxSphereLight, light->color)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:radius", LuxSphereLight, light->radius)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:intensity", LuxSphereLight,
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:color", SphereLight, light->color)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:radius", SphereLight, light->radius)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:intensity", SphereLight,
                    light->intensity)
-    PARSE_ENUM_PROPETY(table, prop, "visibility", VisibilityEnumHandler, LuxSphereLight,
+    PARSE_ENUM_PROPETY(table, prop, "visibility", VisibilityEnumHandler, SphereLight,
                    light->visibility)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", LuxSphereLight, light->extent)
-    ADD_PROPERTY(table, prop, LuxSphereLight, light->props)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, SphereLight,
+                       light->purpose)
+    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", SphereLight, light->extent)
+    ADD_PROPERTY(table, prop, SphereLight, light->props)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
@@ -2260,10 +2331,10 @@ bool ReconstructPrim<LuxSphereLight>(
 }
 
 template <>
-bool ReconstructPrim<LuxRectLight>(
+bool ReconstructPrim<RectLight>(
     const PropertyMap &properties,
     const ReferenceList &references,
-    LuxRectLight *light,
+    RectLight *light,
     std::string *warn,
     std::string *err) {
 
@@ -2278,13 +2349,15 @@ bool ReconstructPrim<LuxRectLight>(
   for (const auto &prop : properties) {
     // PARSE_PROPERTY(prop, "inputs:colorTemperature", light->colorTemperature)
     PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:texture:file", UsdUVTexture, light->file)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:color", LuxRectLight, light->color)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:height", LuxRectLight, light->height)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:width", LuxRectLight, light->width)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:intensity", LuxRectLight,
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:color", RectLight, light->color)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:height", RectLight, light->height)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:width", RectLight, light->width)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:intensity", RectLight,
                    light->intensity)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", LuxSphereLight, light->extent)
-    ADD_PROPERTY(table, prop, LuxSphereLight, light->props)
+    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", RectLight, light->extent)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, RectLight,
+                       light->purpose)
+    ADD_PROPERTY(table, prop, SphereLight, light->props)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
@@ -2292,10 +2365,10 @@ bool ReconstructPrim<LuxRectLight>(
 }
 
 template <>
-bool ReconstructPrim<LuxDiskLight>(
+bool ReconstructPrim<DiskLight>(
     const PropertyMap &properties,
     const ReferenceList &references,
-    LuxDiskLight *light,
+    DiskLight *light,
     std::string *warn,
     std::string *err) {
 
@@ -2309,9 +2382,11 @@ bool ReconstructPrim<LuxDiskLight>(
 
   for (const auto &prop : properties) {
     // PARSE_PROPERTY(prop, "inputs:colorTemperature", light->colorTemperature)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:radius", LuxDiskLight, light->radius)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", LuxDiskLight, light->extent)
-    ADD_PROPERTY(table, prop, LuxDiskLight, light->props)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:radius", DiskLight, light->radius)
+    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", DiskLight, light->extent)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, DiskLight,
+                       light->purpose)
+    ADD_PROPERTY(table, prop, DiskLight, light->props)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
@@ -2319,10 +2394,10 @@ bool ReconstructPrim<LuxDiskLight>(
 }
 
 template <>
-bool ReconstructPrim<LuxCylinderLight>(
+bool ReconstructPrim<CylinderLight>(
     const PropertyMap &properties,
     const ReferenceList &references,
-    LuxCylinderLight *light,
+    CylinderLight *light,
     std::string *warn,
     std::string *err) {
 
@@ -2336,10 +2411,12 @@ bool ReconstructPrim<LuxCylinderLight>(
 
   for (const auto &prop : properties) {
     // PARSE_PROPERTY(prop, "inputs:colorTemperature", light->colorTemperature)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:length", LuxCylinderLight, light->length)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:radius", LuxCylinderLight, light->radius)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", LuxCylinderLight, light->extent)
-    ADD_PROPERTY(table, prop, LuxSphereLight, light->props)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:length", CylinderLight, light->length)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:radius", CylinderLight, light->radius)
+    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", CylinderLight, light->extent)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, CylinderLight,
+                       light->purpose)
+    ADD_PROPERTY(table, prop, SphereLight, light->props)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
@@ -2347,10 +2424,10 @@ bool ReconstructPrim<LuxCylinderLight>(
 }
 
 template <>
-bool ReconstructPrim<LuxDistantLight>(
+bool ReconstructPrim<DistantLight>(
     const PropertyMap &properties,
     const ReferenceList &references,
-    LuxDistantLight *light,
+    DistantLight *light,
     std::string *warn,
     std::string *err) {
 
@@ -2364,8 +2441,10 @@ bool ReconstructPrim<LuxDistantLight>(
 
   for (const auto &prop : properties) {
     // PARSE_PROPERTY(prop, "inputs:colorTemperature", light->colorTemperature)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:angle", LuxDistantLight, light->angle)
-    ADD_PROPERTY(table, prop, LuxSphereLight, light->props)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:angle", DistantLight, light->angle)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, DistantLight,
+                       light->purpose)
+    ADD_PROPERTY(table, prop, SphereLight, light->props)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
@@ -2373,10 +2452,10 @@ bool ReconstructPrim<LuxDistantLight>(
 }
 
 template <>
-bool ReconstructPrim<LuxDomeLight>(
+bool ReconstructPrim<DomeLight>(
     const PropertyMap &properties,
     const ReferenceList &references,
-    LuxDomeLight *light,
+    DomeLight *light,
     std::string *warn,
     std::string *err) {
 
@@ -2389,16 +2468,18 @@ bool ReconstructPrim<LuxDomeLight>(
   }
 
   for (const auto &prop : properties) {
-    PARSE_TYPED_ATTRIBUTE(table, prop, "guideRadius", LuxDomeLight, light->guideRadius)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:diffuse", LuxDomeLight, light->diffuse)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:specular", LuxDomeLight,
+    PARSE_TYPED_ATTRIBUTE(table, prop, "guideRadius", DomeLight, light->guideRadius)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:diffuse", DomeLight, light->diffuse)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:specular", DomeLight,
                    light->specular)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:colorTemperature", LuxDomeLight,
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:colorTemperature", DomeLight,
                    light->colorTemperature)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:color", LuxDomeLight, light->color)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:intensity", LuxDomeLight,
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:color", DomeLight, light->color)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "inputs:intensity", DomeLight,
                    light->intensity)
-    ADD_PROPERTY(table, prop, LuxDomeLight, light->props)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, DomeLight,
+                       light->purpose)
+    ADD_PROPERTY(table, prop, DomeLight, light->props)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
@@ -2857,7 +2938,7 @@ bool ReconstructPrim<GeomMesh>(
       -> nonstd::expected<GeomMesh::SubdivisionScheme, std::string> {
     using EnumTy = std::pair<GeomMesh::SubdivisionScheme, const char *>;
     const std::vector<EnumTy> enums = {
-        std::make_pair(GeomMesh::SubdivisionScheme::None, "none"),
+        std::make_pair(GeomMesh::SubdivisionScheme::SubdivisionSchemeNone, "none"),
         std::make_pair(GeomMesh::SubdivisionScheme::CatmullClark,
                        "catmullClark"),
         std::make_pair(GeomMesh::SubdivisionScheme::Loop, "loop"),
@@ -2871,7 +2952,7 @@ bool ReconstructPrim<GeomMesh>(
       -> nonstd::expected<GeomMesh::InterpolateBoundary, std::string> {
     using EnumTy = std::pair<GeomMesh::InterpolateBoundary, const char *>;
     const std::vector<EnumTy> enums = {
-        std::make_pair(GeomMesh::InterpolateBoundary::None, "none"),
+        std::make_pair(GeomMesh::InterpolateBoundary::InterpolateBoundaryNone, "none"),
         std::make_pair(GeomMesh::InterpolateBoundary::EdgeAndCorner,
                        "edgeAndCorner"),
         std::make_pair(GeomMesh::InterpolateBoundary::EdgeOnly, "edgeOnly"),
@@ -2894,7 +2975,7 @@ bool ReconstructPrim<GeomMesh>(
                        "cornersOnly"),
         std::make_pair(GeomMesh::FaceVaryingLinearInterpolation::Boundaries,
                        "boundaries"),
-        std::make_pair(GeomMesh::FaceVaryingLinearInterpolation::None, "none"),
+        std::make_pair(GeomMesh::FaceVaryingLinearInterpolation::FaceVaryingLinearInterpolationNone, "none"),
         std::make_pair(GeomMesh::FaceVaryingLinearInterpolation::All, "all"),
     };
     return EnumHandler<GeomMesh::FaceVaryingLinearInterpolation>(
@@ -2950,6 +3031,7 @@ bool ReconstructPrim<GeomMesh>(
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
+#if 0
   //
   // Resolve append references
   // (Overwrite variables with the referenced one).
@@ -2959,6 +3041,7 @@ bool ReconstructPrim<GeomMesh>(
       // TODO
     }
   }
+#endif
 
   return true;
 }
@@ -3040,8 +3123,6 @@ bool ReconstructPrim<GeomCamera>(
     PARSE_TYPED_ATTRIBUTE(table, prop, "fStop", GeomCamera, camera->fStop)
     PARSE_TYPED_ATTRIBUTE(table, prop, "horizontalAperture", GeomCamera,
                    camera->horizontalAperture)
-    PARSE_TYPED_ATTRIBUTE(table, prop, "horizontalApertureOffset", GeomCamera,
-                   camera->horizontalApertureOffset)
     PARSE_TYPED_ATTRIBUTE(table, prop, "horizontalApertureOffset", GeomCamera,
                    camera->horizontalApertureOffset)
     PARSE_TYPED_ATTRIBUTE(table, prop, "clippingRange", GeomCamera,
@@ -3372,7 +3453,7 @@ bool ReconstructPrim<Shader>(
 
   std::string shader_type;
   if (info_id_prop->second.IsAttrib()) {
-    const PrimAttrib &attr = info_id_prop->second.attrib;
+    const PrimAttrib &attr = info_id_prop->second.GetAttrib();
     if ((attr.type_name() == value::kToken)) {
       if (auto pv = attr.get_value<value::token>()) {
         shader_type = pv.value().str();
@@ -3496,6 +3577,8 @@ bool ReconstructPrim<Material>(
                                   Material, material->surface)
     PARSE_SHADER_INPUT_CONNECTION_PROPERTY(table, prop, "outputs:volume",
                                   Material, material->volume)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, Material,
+                       material->purpose)
     ADD_PROPERTY(table, prop, Material, material->props)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }

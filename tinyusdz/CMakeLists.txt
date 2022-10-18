@@ -44,7 +44,8 @@ option(
 # Use embedded version of OpenSubdiv code by default
 set(osd_DIR ${PROJECT_SOURCE_DIR}/src/osd)
 
-option(TINYUSDZ_WITH_AUDIO "Build with Audio support(WAV and MP3)" ON)
+option(TINYUSDZ_WITH_AUDIO "Build with Audio support(MP3 and WAV)" ON)
+option(TINYUSDZ_WITH_ALAC_AUDIO "Build with ALAC(as M4A) Audio support" OFF)
 
 option(TINYUSDZ_WITH_PYTHON "Build with Python binding through pybind11" OFF)
 
@@ -130,17 +131,32 @@ if(TINYUSDZ_WITH_EXR OR TINYUSDZ_WITH_TIFF)
   endif()
 endif()
 
-if(TINYUSDZ_WITH_PYTHON)
-  #set(CMAKE_CXX_STANDARD 17) # nanobind requires C++17
 
-  # for pybind11
-  set(CMAKE_CXX_STANDARD 14)
-else()
-  # Require strict C++14 mode(e.g. `-std=c++14`)
-  set(CMAKE_CXX_STANDARD 14)
+# Currently TinyUSDZ does not claim CXX version when TinyUSDZ is added as add_subdirectory()
+# of toplevel(root) project.
+# TODO: Property inherit CXX compiler settings from toplevel(root) project.
+
+# PROJECT_IS_TOP_LEVEL is available from cmake 3.21
+if (CMAKE_VERSION VERSION_LESS 3.21)
+  if ("${CMAKE_PROJECT_NAME}" STREQUAL "${TINYUSDZ_TARGET}")
+    set(PROJECT_IS_TOP_LEVEL ON)
+  endif()
+endif ()
+
+if (PROJECT_IS_TOP_LEVEL)
+  message(STATUS "TinyUSDZ is being built as toplevel project so set CXX standard here.")
+  if(TINYUSDZ_WITH_PYTHON)
+    #set(CMAKE_CXX_STANDARD 17) # nanobind requires C++17
+
+    # for pybind11
+    set(CMAKE_CXX_STANDARD 14)
+  else()
+    # Require strict C++14 mode(e.g. `-std=c++14`)
+    set(CMAKE_CXX_STANDARD 14)
+  endif()
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  set(CMAKE_CXX_EXTENSIONS OFF)
 endif()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 # [ccache]
 if(TINYUSDZ_USE_CCACHE)
@@ -222,6 +238,9 @@ set(TINYUSDZ_SOURCES
     ${PROJECT_SOURCE_DIR}/src/xform.cc
     ${PROJECT_SOURCE_DIR}/src/performance.cc
     ${PROJECT_SOURCE_DIR}/src/ascii-parser.cc
+    ${PROJECT_SOURCE_DIR}/src/ascii-parser-basetype.cc
+    ${PROJECT_SOURCE_DIR}/src/ascii-parser-timesamples.cc
+    ${PROJECT_SOURCE_DIR}/src/ascii-parser-timesamples-array.cc
     ${PROJECT_SOURCE_DIR}/src/audio-loader.cc
     ${PROJECT_SOURCE_DIR}/src/usda-reader.cc
     ${PROJECT_SOURCE_DIR}/src/usdc-reader.cc
@@ -232,6 +251,7 @@ set(TINYUSDZ_SOURCES
     ${PROJECT_SOURCE_DIR}/src/crate-writer.cc
     ${PROJECT_SOURCE_DIR}/src/crate-pprint.cc
     ${PROJECT_SOURCE_DIR}/src/prim-reconstruct.cc
+    ${PROJECT_SOURCE_DIR}/src/prim-composition.cc
     ${PROJECT_SOURCE_DIR}/src/prim-types.cc
     ${PROJECT_SOURCE_DIR}/src/primvar.cc
     ${PROJECT_SOURCE_DIR}/src/value-pprint.cc
@@ -249,6 +269,9 @@ set(TINYUSDZ_SOURCES
     ${PROJECT_SOURCE_DIR}/src/usdObj.cc
     ${PROJECT_SOURCE_DIR}/src/image-loader.cc
     ${PROJECT_SOURCE_DIR}/src/pprinter.cc
+    ${PROJECT_SOURCE_DIR}/src/stage.cc
+    ${PROJECT_SOURCE_DIR}/src/tydra/scene-access.cc
+    ${PROJECT_SOURCE_DIR}/src/tydra/shader-network.cc
     ${PROJECT_SOURCE_DIR}/src/tydra/render-data.cc)
 
 if(TINYUSDZ_WITH_PXR_COMPAT_API)
@@ -339,6 +362,21 @@ if(TINYUSDZ_WITH_TIFF OR TINYUSDZ_WITH_EXR)
   endif()
 
 endif()
+
+if(TINYUSDZ_WITH_ALAC_AUDIO)
+  list(APPEND TINYUSDZ_DEP_SOURCES
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/EndianPortable.c
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/ALACBitUtilities.c
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/ALACDecoder.cpp
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/ALACEncoder.cpp
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/ag_dec.c
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/ag_enc.c
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/dp_dec.c
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/dp_enc.c
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/matrix_dec.c
+       ${PROJECT_SOURCE_DIR}/src/external/alac/codec/matrix_enc.c
+  )
+endif(TINYUSDZ_WITH_ALAC_AUDIO)
 
 if(TINYUSDZ_WITH_OPENSUBDIV)
 
@@ -480,10 +518,11 @@ endif()
 #
 foreach(TINYUSDZ_LIB_TARGET ${TINYUSDZ_LIBS})
 
-  # /bigobj is required to avoid : fatal  error C1128: number of sections exceeded object file format limit: compile with /bigobj
-  if(MSVC)
-    target_compile_options(${TINYUSDZ_LIB_TARGET} PRIVATE /bigobj)
-  endif()
+  # Current TinyUSDZ now should compile well without /bigobj flag.
+  # Uncommend if you encounter the following errror: fatal  error C1128: number of sections exceeded object file format limit: compile with /bigobj
+  #if(MSVC)
+  #  target_compile_options(${TINYUSDZ_LIB_TARGET} PRIVATE /bigobj)
+  #endif()
 
   if(TINYUSDZ_PRODUCTION_BUILD)
     target_compile_definitions(${TINYUSDZ_LIB_TARGET}
@@ -521,12 +560,6 @@ foreach(TINYUSDZ_LIB_TARGET ${TINYUSDZ_LIBS})
 
   target_include_directories(${TINYUSDZ_LIB_TARGET}
                              PRIVATE ${PROJECT_SOURCE_DIR}/src)
-  #target_include_directories(${TINYUSDZ_LIB_TARGET}
-  #                           PRIVATE ${PROJECT_SOURCE_DIR}/src/external/ryu/)
-  #target_include_directories(${TINYUSDZ_LIB_TARGET}
-  #                           PRIVATE ${PROJECT_SOURCE_DIR}/src/external/fast_float/include)
-  #target_include_directories(${TINYUSDZ_LIB_TARGET}
-  #                           PRIVATE ${PROJECT_SOURCE_DIR}/src/external/simple_match/include)
 
   #if(TINYUSDZ_WITH_JSON)
   ##target_include_directories(
@@ -573,6 +606,11 @@ foreach(TINYUSDZ_LIB_TARGET ${TINYUSDZ_LIBS})
     target_compile_definitions(${TINYUSDZ_LIB_TARGET}
                                PRIVATE "TINYUSDZ_WITH_AUDIO")
   endif(TINYUSDZ_WITH_AUDIO)
+
+  if(TINYUSDZ_WITH_ALAC_AUDIO)
+    target_compile_definitions(${TINYUSDZ_LIB_TARGET}
+                               PRIVATE "TINYUSDZ_WITH_ALAC_AUDIO")
+  endif(TINYUSDZ_WITH_ALAC_AUDIO)
 
   if(TINYUSDZ_WITH_OPENSUBDIV)
     target_include_directories(${TINYUSDZ_LIB_TARGET} PRIVATE ${osd_DIR})
@@ -689,6 +727,7 @@ endif()
 
 if(TINYUSDZ_BUILD_EXAMPLES)
   add_subdirectory(examples/simple_usdz_dump)
+  add_subdirectory(examples/tydra_convert)
   if(TINYUSDZ_WITH_MODULE_USDA_WRITER)
     add_subdirectory(examples/save_usda)
   endif()
@@ -758,6 +797,11 @@ if(TINYUSDZ_BUILD_TESTS)
   # unit tester
   #
   add_subdirectory(${PROJECT_SOURCE_DIR}/tests/unit)
+
+  #
+  # Compression tester
+  #
+  add_subdirectory(${PROJECT_SOURCE_DIR}/tests/decompress-int)
 
   #
   # USDA parser tester

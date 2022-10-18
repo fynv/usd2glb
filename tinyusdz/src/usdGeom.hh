@@ -6,6 +6,7 @@
 
 #include "prim-types.hh"
 #include "value-types.hh"
+#include "xform.hh"
 
 namespace tinyusdz {
 
@@ -30,6 +31,7 @@ constexpr auto kPointInstancer = "PointInstancer";
 
 struct GPrim : Xformable {
   std::string name;
+  Specifier spec{Specifier::Def};
 
   int64_t parent_id{-1};  // Index to parent node
 
@@ -62,6 +64,8 @@ struct GPrim : Xformable {
 
   std::map<std::string, Property> props;
 
+  std::map<std::string, VariantSet> variantSet;
+
   bool _valid{true};  // default behavior is valid(allow empty GPrim)
 
   // Prim metadataum.
@@ -86,6 +90,7 @@ struct GeomSubset {
   };
 
   std::string name;
+  Specifier spec;
 
   int64_t parent_id{-1};  // Index to parent node
 
@@ -127,9 +132,10 @@ struct GeomSubset {
 };
 
 // Polygon mesh geometry
+// X11's X.h uses `None` macro, so add extra prefix to `None` enum
 struct GeomMesh : GPrim {
   enum class InterpolateBoundary {
-    None,           // "none"
+    InterpolateBoundaryNone,           // "none"
     EdgeAndCorner,  // "edgeAndCorner"
     EdgeOnly        // "edgeOnly"
   };
@@ -139,7 +145,7 @@ struct GeomMesh : GPrim {
     CornersPlus2,  // "cornersPlus2"
     CornersOnly,   // "cornersOnly"
     Boundaries,    // "boundaries"
-    None,          // "none"
+    FaceVaryingLinearInterpolationNone,          // "none"
     All,           // "all"
   };
 
@@ -147,7 +153,7 @@ struct GeomMesh : GPrim {
     CatmullClark,  // "catmullClark"
     Loop,          // "loop"
     Bilinear,      // "bilinear"
-    None,          // "none"
+    SubdivisionSchemeNone,          // "none"
   };
 
   //
@@ -202,8 +208,20 @@ struct GeomMesh : GPrim {
   ///
   Interpolation GetNormalsInterpolation() const;
 
-  const std::vector<int32_t> GetFaceVertexCounts(double time=value::TimeCode::Default(), TimeSampleInterpolationType interp=TimeSampleInterpolationType::Linear) const;
-  const std::vector<int32_t> GetFaceVertexIndices(double time=value::TimeCode::Default(), TimeSampleInterpolationType interp=TimeSampleInterpolationType::Linear) const;
+  ///
+  /// @brief Returns `faceVertexCounts`.
+  ///
+  /// @return face vertex counts vector(copied)
+  ///
+  const std::vector<int32_t> GetFaceVertexCounts() const;
+
+  ///
+  /// @brief Returns `faceVertexIndices`.
+  ///
+  /// @return face vertex indices vector(copied)
+  ///
+  const std::vector<int32_t> GetFaceVertexIndices() const;
+
 
   //
   // SubD attribs.
