@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <tinyusdz.hh>
 #include <usdShade.hh>
+#include <usdSkel.hh>
 #include <usda-writer.hh>
 
 #define TINYGLTF_IMPLEMENTATION
@@ -88,6 +89,8 @@ int main(int argc, char* argv[])
 
 	std::vector<Mid::Material> material_lst;
 	std::unordered_map<std::string, int> material_map;
+
+	std::unordered_map<std::string, int> skeleton_map;
 
 	struct Prim
 	{
@@ -442,10 +445,181 @@ int main(int argc, char* argv[])
 				prim_out.attributes["TEXCOORD_0"] = acc_id;
 			}
 
+			auto iter_ji = mesh_in->props.find("primvars:skel:jointIndices");
+			auto iter_jw = mesh_in->props.find("primvars:skel:jointWeights");
+			if (iter_ji != mesh_in->props.end() && iter_jw != mesh_in->props.end())
+			{
+				m_out.nodes[node_id].skin = 0;
+				auto ji = iter_ji->second.GetAttrib().get_value<std::vector<int>>().value();
+				auto jw = iter_jw->second.GetAttrib().get_value<std::vector<float>>().value();
+
+				unsigned elem_size = iter_ji->second.GetAttrib().meta.elementSize.value();
+				size_t count = ji.size() / elem_size;				
+
+				std::vector<glm::u8vec4> conv_ji(count, { 0,0,0,0 });
+				std::vector<glm::vec4> conv_jw(count, { 0.0f, 0.0f, 0.0f, 0.0f });
+				
+				for (size_t i = 0; i < count; i++)
+				{
+					unsigned elems = 4;
+					if (elem_size < elems) elems = elem_size;
+					for (unsigned j = 0; j < elems; j++)
+					{
+						size_t idx = elem_size * i + j;						
+						conv_ji[i][j] = (uint8_t)ji[idx];
+						conv_jw[i][j] = jw[idx];
+					}
+				}
+				
+				offset = buf_out.data.size();
+				length = sizeof(glm::u8vec4) * count;
+				buf_out.data.resize(offset + length);
+				memcpy(buf_out.data.data() + offset, conv_ji.data(), length);
+
+				view_id = m_out.bufferViews.size();
+				{
+					tinygltf::BufferView view;
+					view.buffer = 0;
+					view.byteOffset = offset;
+					view.byteLength = length;
+					view.target = TINYGLTF_TARGET_ARRAY_BUFFER;
+					m_out.bufferViews.push_back(view);
+				}
+
+				acc_id = m_out.accessors.size();
+				{
+					tinygltf::Accessor acc;
+					acc.bufferView = view_id;
+					acc.byteOffset = 0;
+					acc.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+					acc.count = count;
+					acc.type = TINYGLTF_TYPE_VEC4;
+					m_out.accessors.push_back(acc);
+				}
+
+				prim_out.attributes["JOINTS_0"] = acc_id;
+
+				offset = buf_out.data.size();
+				length = sizeof(glm::vec4) * count;
+				buf_out.data.resize(offset + length);
+				memcpy(buf_out.data.data() + offset, conv_jw.data(), length);
+
+				view_id = m_out.bufferViews.size();
+				{
+					tinygltf::BufferView view;
+					view.buffer = 0;
+					view.byteOffset = offset;
+					view.byteLength = length;
+					view.target = TINYGLTF_TARGET_ARRAY_BUFFER;
+					m_out.bufferViews.push_back(view);
+				}
+
+				acc_id = m_out.accessors.size();
+				{
+					tinygltf::Accessor acc;
+					acc.bufferView = view_id;
+					acc.byteOffset = 0;
+					acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+					acc.count = count;
+					acc.type = TINYGLTF_TYPE_VEC4;
+					m_out.accessors.push_back(acc);
+				}
+
+				prim_out.attributes["WEIGHTS_0"] = acc_id;
+
+			}
+
 			
 			prim_out.mode = TINYGLTF_MODE_TRIANGLES;
 			m_out.meshes.push_back(mesh_out);
 
+		}
+
+		else if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_SKEL_ROOT)
+		{
+			auto* skel_root_in = prim.prim->data().as<tinyusdz::SkelRoot>();
+		}
+		else if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_SKELETON)
+		{
+			int skin_idx = (int)m_out.skins.size();
+			m_out.skins.resize(skin_idx + 1);
+			tinygltf::Skin& skin_out = m_out.skins[skin_idx];
+			// skin_out.skeleton = prim.id_node_base;
+
+			auto* skel_in = prim.prim->data().as<tinyusdz::Skeleton>();			
+			auto bindTrans = skel_in->bindTransforms.GetValue().value();
+			auto joints = skel_in->joints.GetValue().value();
+			auto restTrans = skel_in->restTransforms.GetValue().value();		
+
+			std::vector<glm::mat4> inv_binding_matrices(bindTrans.size());
+
+			for (size_t i = 0; i < joints.size(); i++)
+			{
+				int node_id = (int)m_out.nodes.size();
+				skin_out.joints.push_back(node_id);
+
+				std::string path = joints[i].str();
+				skeleton_map[path] = node_id;
+
+				auto bind = bindTrans[i];
+				glm::mat4 bindMat;
+
+				const double* pDBindMat = (double*)(&bind);
+				float* pFBindMat = (float*)(&bindMat);
+				for (int j = 0; j < 16; j++)
+				{
+					pFBindMat[j] = (float)pDBindMat[j];
+				}
+				inv_binding_matrices[i] = glm::inverse(bindMat);
+
+				auto rest = restTrans[i];
+
+				tinygltf::Node node_out;
+				node_out.matrix.resize(16);
+				memcpy(node_out.matrix.data(), &rest, sizeof(double) * 16);
+
+				size_t pos = path.rfind('/');
+				if (pos == std::string::npos)
+				{
+					node_out.name = path;
+					m_out.nodes[prim.id_node_base].children.push_back(node_id);					
+				}
+				else
+				{
+					node_out.name = path.substr(pos + 1);
+					int id_parent = skeleton_map[path.substr(0, pos)];
+					m_out.nodes[id_parent].children.push_back(node_id);
+				}
+				m_out.nodes.push_back(node_out);
+
+			}
+			
+			offset = buf_out.data.size();
+			length = sizeof(glm::mat4) * inv_binding_matrices.size();
+			buf_out.data.resize(offset + length);
+			memcpy(buf_out.data.data() + offset, inv_binding_matrices.data(), length);
+
+			view_id = m_out.bufferViews.size();
+			{
+				tinygltf::BufferView view;
+				view.buffer = 0;
+				view.byteOffset = offset;
+				view.byteLength = length;
+				m_out.bufferViews.push_back(view);
+			}
+
+			acc_id = m_out.accessors.size();
+			{
+				tinygltf::Accessor acc;
+				acc.bufferView = view_id;
+				acc.byteOffset = 0;
+				acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+				acc.count = inv_binding_matrices.size();
+				acc.type = TINYGLTF_TYPE_MAT4;
+				m_out.accessors.push_back(acc);
+			}
+
+			skin_out.inverseBindMatrices = acc_id;
 		}
 
 		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL)
