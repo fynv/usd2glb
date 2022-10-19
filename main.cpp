@@ -38,6 +38,8 @@ namespace Mid
 
 		std::string uvset = "";
 
+		int idx_diffuse = -1;
+		int idx_emissive = -1;
 		int idx_metallic_roughness = -1;
 	};
 }
@@ -475,7 +477,13 @@ int main(int argc, char* argv[])
 				img.Load(material.diffuse_tex.c_str());
 			
 				tex_map[material.diffuse_tex] = idx;
+				material.idx_diffuse = idx;
 			}
+			else
+			{
+				material.idx_diffuse = iter->second;
+			}
+			
 		}
 		if (material.emissive_tex != "")
 		{
@@ -489,6 +497,11 @@ int main(int argc, char* argv[])
 				img.Load(material.emissive_tex.c_str());
 
 				tex_map[material.emissive_tex] = idx;
+				material.idx_emissive = idx;
+			}
+			else
+			{
+				material.idx_emissive = iter->second;
 			}
 		}
 
@@ -528,13 +541,6 @@ int main(int argc, char* argv[])
 		tinygltf::Image& img_out = m_out.images[i];
 		tinygltf::Texture& tex_out = m_out.textures[i];
 
-		std::string ext = img_mid.filename.substr(img_mid.filename.find_last_of(".") + 1);
-		std::string mimeType = "image/jpeg";
-		if (ext == "png" || ext == "PNG")
-		{
-			mimeType = "image/png";
-		}
-
 		length = img_mid.code.size();
 		offset = buf_out.data.size();
 		buf_out.data.resize(offset + length);
@@ -545,7 +551,7 @@ int main(int argc, char* argv[])
 		img_out.component = 4;
 		img_out.bits = 8;
 		img_out.pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
-		img_out.mimeType = mimeType;
+		img_out.mimeType = img_mid.mimeType;
 
 		view_id = m_out.bufferViews.size();
 		{
@@ -570,18 +576,18 @@ int main(int argc, char* argv[])
 		material_out.name = material_mid.name;
 		material_out.doubleSided = material_mid.double_sided;		
 		
-		if (material_mid.diffuse_tex != "")
+		if (material_mid.idx_diffuse>=0)
 		{
-			material_out.pbrMetallicRoughness.baseColorTexture.index = tex_map[material_mid.diffuse_tex];
+			material_out.pbrMetallicRoughness.baseColorTexture.index = material_mid.idx_diffuse;
 		}
 		else
 		{
 			material_out.pbrMetallicRoughness.baseColorFactor = { material_mid.diffuse_color[0], material_mid.diffuse_color[1], material_mid.diffuse_color[2], 1.0f };
 		}
 
-		if (material_mid.emissive_tex != "")
+		if (material_mid.idx_emissive>=0)
 		{
-			material_out.emissiveTexture.index = tex_map[material_mid.diffuse_tex];
+			material_out.emissiveTexture.index = material_mid.idx_emissive;
 		}
 		else
 		{

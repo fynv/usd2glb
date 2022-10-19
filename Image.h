@@ -12,7 +12,7 @@ namespace Mid
 	struct Image
 	{
 	public:
-		std::string filename;
+		std::string mimeType;
 		int width = -1;
 		int height = -1;
 		std::vector<uint8_t> pixels;
@@ -78,7 +78,13 @@ namespace Mid
 
 	void Image::Load(const char* fn)
 	{
-		this->filename = fn;
+		std::string filename = fn;
+		std::string ext = filename.substr(filename.find_last_of(".") + 1);
+		this->mimeType = "image/jpeg";
+		if (ext == "png" || ext == "PNG")
+		{
+			this->mimeType = "image/png";
+		}
 		int width, height, chn;
 		uint8_t* data = stbi_load(fn, &width, &height, &chn, 4);
 		this->width = width;
@@ -130,8 +136,7 @@ namespace Mid
 			}
 		}
 
-		filename = ".jpg";
-
+		this->mimeType = "image/jpeg";
 		
 		stbi_write_jpg_to_func([](void* context, void* data, int size)
 		{
