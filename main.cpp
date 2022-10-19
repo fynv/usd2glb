@@ -12,6 +12,8 @@
 
 
 #include <glm.hpp>
+#include <gtc/quaternion.hpp>
+#include <gtx/matrix_decompose.hpp>
 #include <vector>
 #include <queue>
 #include <unordered_map>
@@ -118,8 +120,20 @@ int main(int argc, char* argv[])
 
 			tinyusdz::value::matrix4d matrix;
 			node_in->EvaluateXformOps(&matrix, nullptr, nullptr);
-			node_out.matrix.resize(16);
-			memcpy(node_out.matrix.data(), &matrix, sizeof(double) * 16);
+
+			glm::mat4 mat = *(glm::dmat4*)(&matrix);
+			glm::vec3 scale;
+			glm::quat rotation;
+			glm::vec3 translation;
+			
+			glm::vec3 skew;
+			glm::vec4 persp;
+			glm::decompose(mat, scale, rotation, translation, skew, persp);
+
+			node_out.translation = { translation.x, translation.y, translation.z };
+			node_out.rotation = { rotation.x, rotation.y, rotation.z, rotation.w };
+			node_out.scale = { scale.x, scale.y, scale.z };
+
 			m_out.nodes.push_back(node_out);
 			if (prim.id_node_base >= 0)
 			{
@@ -544,7 +558,7 @@ int main(int argc, char* argv[])
 			int skin_idx = (int)m_out.skins.size();
 			m_out.skins.resize(skin_idx + 1);
 			tinygltf::Skin& skin_out = m_out.skins[skin_idx];
-			// skin_out.skeleton = prim.id_node_base;
+			skin_out.skeleton = prim.id_node_base;
 
 			auto* skel_in = prim.prim->data().as<tinyusdz::Skeleton>();			
 			auto bindTrans = skel_in->bindTransforms.GetValue().value();
@@ -575,8 +589,19 @@ int main(int argc, char* argv[])
 				auto rest = restTrans[i];
 
 				tinygltf::Node node_out;
-				node_out.matrix.resize(16);
-				memcpy(node_out.matrix.data(), &rest, sizeof(double) * 16);
+
+				glm::mat4 mat = *(glm::dmat4*)(&rest);
+				glm::vec3 scale;
+				glm::quat rotation;
+				glm::vec3 translation;
+
+				glm::vec3 skew;
+				glm::vec4 persp;
+				glm::decompose(mat, scale, rotation, translation, skew, persp);
+
+				node_out.translation = { translation.x, translation.y, translation.z };
+				node_out.rotation = { rotation.x, rotation.y, rotation.z, rotation.w };
+				node_out.scale = { scale.x, scale.y, scale.z };
 
 				size_t pos = path.rfind('/');
 				if (pos == std::string::npos)
