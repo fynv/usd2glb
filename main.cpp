@@ -162,6 +162,16 @@ int main(int argc, char* argv[])
 					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
 					auto file = tex->file.GetValue().value().value;
 					material_mid.emissive_tex = file.GetAssetPath();
+
+					auto uv_connection = tex->st.GetConnection();
+					if (uv_connection.has_value())
+					{
+						std::string path_uv = uv_connection.value().GetPrimPart();
+						const tinyusdz::Prim* pshader2 = stage.GetPrimAtPath(tinyusdz::Path(path_uv, "")).value();
+						auto* shader2 = pshader2->data().as<tinyusdz::Shader>();
+						auto* uvset = shader2->value.as<tinyusdz::UsdPrimvarReader_float2>();
+						material_mid.uvset = uvset->varname.GetValue().value().value.str();
+					}
 				}
 				else
 				{
@@ -180,6 +190,16 @@ int main(int argc, char* argv[])
 					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
 					auto file = tex->file.GetValue().value().value;
 					material_mid.metallic_tex = file.GetAssetPath();
+
+					auto uv_connection = tex->st.GetConnection();
+					if (uv_connection.has_value())
+					{
+						std::string path_uv = uv_connection.value().GetPrimPart();
+						const tinyusdz::Prim* pshader2 = stage.GetPrimAtPath(tinyusdz::Path(path_uv, "")).value();
+						auto* shader2 = pshader2->data().as<tinyusdz::Shader>();
+						auto* uvset = shader2->value.as<tinyusdz::UsdPrimvarReader_float2>();
+						material_mid.uvset = uvset->varname.GetValue().value().value.str();
+					}
 				}
 				else
 				{
@@ -197,6 +217,16 @@ int main(int argc, char* argv[])
 					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
 					auto file = tex->file.GetValue().value().value;
 					material_mid.roughness_tex = file.GetAssetPath();
+
+					auto uv_connection = tex->st.GetConnection();
+					if (uv_connection.has_value())
+					{
+						std::string path_uv = uv_connection.value().GetPrimPart();
+						const tinyusdz::Prim* pshader2 = stage.GetPrimAtPath(tinyusdz::Path(path_uv, "")).value();
+						auto* shader2 = pshader2->data().as<tinyusdz::Shader>();
+						auto* uvset = shader2->value.as<tinyusdz::UsdPrimvarReader_float2>();
+						material_mid.uvset = uvset->varname.GetValue().value().value.str();
+					}
 				}
 				else
 				{
@@ -482,7 +512,7 @@ int main(int argc, char* argv[])
 				}
 
 				prim_out.attributes["TEXCOORD_0"] = acc_id;
-			}
+			}			
 
 			auto iter_ji = mesh_in->props.find("primvars:skel:jointIndices");
 			auto iter_jw = mesh_in->props.find("primvars:skel:jointWeights");
