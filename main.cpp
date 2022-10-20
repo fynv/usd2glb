@@ -765,7 +765,7 @@ int main(int argc, char* argv[])
 
 		length = img_mid.code.size();
 		offset = buf_out.data.size();
-		buf_out.data.resize(offset + length);
+		buf_out.data.resize((offset + length + 3) / 4 * 4);
 		memcpy(buf_out.data.data() + offset, img_mid.code.data(), length);
 
 		img_out.width = img_mid.width;
