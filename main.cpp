@@ -91,8 +91,9 @@ int main(int argc, char* argv[])
 
 	std::vector<Mid::Material> material_lst;
 	std::unordered_map<std::string, int> material_map;
-
-	std::unordered_map<std::string, int> skeleton_map;
+	std::unordered_map<std::string, int> joint_map;
+	std::unordered_map<int, std::string> node_skin_map;
+	std::unordered_map<std::string, int> skin_map;
 
 	struct Prim
 	{
@@ -108,7 +109,7 @@ int main(int argc, char* argv[])
 	{
 		Prim prim = queue_prim.front();
 		queue_prim.pop();
-		std::string path = prim.base_path + "/" + prim.prim->local_path().full_path_name();		
+		std::string path = prim.base_path + "/" + prim.prim->element_path().full_path_name();		
 
 		if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_GEOM_XFORM)
 		{
@@ -418,19 +419,19 @@ int main(int argc, char* argv[])
 
 			prim_out.indices = acc_id;
 
-
-			auto iter = mesh_in->props.find("primvars:st0");
+			std::string var_name_uvset = std::string("primvars:") + material_mid.uvset;
+			auto iter = mesh_in->props.find(var_name_uvset);
 			if (iter != mesh_in->props.end())
 			{
-				auto st0 = iter->second.GetAttrib().get_value<std::vector<tinyusdz::value::float2>>().value();
+				auto uv = iter->second.GetAttrib().get_value<std::vector<tinyusdz::value::float2>>().value();
 				
 				offset = buf_out.data.size();
-				length = st0.size() * sizeof(glm::vec2);
+				length = uv.size() * sizeof(glm::vec2);
 				buf_out.data.resize(offset + length);
-				memcpy(buf_out.data.data() + offset, st0.data(), length);
+				memcpy(buf_out.data.data() + offset, uv.data(), length);
 
 				float* p_uv = (float*)(buf_out.data.data() + offset);
-				for (size_t i = 0; i < st0.size(); i++)
+				for (size_t i = 0; i < uv.size(); i++)
 				{
 					p_uv[i * 2 + 1] = 1.0f - p_uv[i * 2 + 1];
 				}
@@ -452,7 +453,7 @@ int main(int argc, char* argv[])
 					acc.byteOffset = 0;
 					acc.type = TINYGLTF_TYPE_VEC2;
 					acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-					acc.count = st0.size();
+					acc.count = uv.size();
 					m_out.accessors.push_back(acc);
 				}
 
@@ -463,7 +464,9 @@ int main(int argc, char* argv[])
 			auto iter_jw = mesh_in->props.find("primvars:skel:jointWeights");
 			if (iter_ji != mesh_in->props.end() && iter_jw != mesh_in->props.end())
 			{
-				m_out.nodes[node_id].skin = 0;
+				std::string skel_path = mesh_in->skeleton.value().full_path_name();
+				node_skin_map[node_id] = skel_path;				
+
 				auto ji = iter_ji->second.GetAttrib().get_value<std::vector<int>>().value();
 				auto jw = iter_jw->second.GetAttrib().get_value<std::vector<float>>().value();
 
@@ -559,6 +562,7 @@ int main(int argc, char* argv[])
 			m_out.skins.resize(skin_idx + 1);
 			tinygltf::Skin& skin_out = m_out.skins[skin_idx];
 			skin_out.skeleton = prim.id_node_base;
+			skin_map[path] = skin_idx;			
 
 			auto* skel_in = prim.prim->data().as<tinyusdz::Skeleton>();			
 			auto bindTrans = skel_in->bindTransforms.GetValue().value();
@@ -573,7 +577,7 @@ int main(int argc, char* argv[])
 				skin_out.joints.push_back(node_id);
 
 				std::string path = joints[i].str();
-				skeleton_map[path] = node_id;
+				joint_map[path] = node_id;
 
 				auto bind = bindTrans[i];
 				glm::mat4 bindMat;
@@ -612,7 +616,7 @@ int main(int argc, char* argv[])
 				else
 				{
 					node_out.name = path.substr(pos + 1);
-					int id_parent = skeleton_map[path.substr(0, pos)];
+					int id_parent = joint_map[path.substr(0, pos)];
 					m_out.nodes[id_parent].children.push_back(node_id);
 				}
 				m_out.nodes.push_back(node_out);
@@ -805,6 +809,17 @@ int main(int argc, char* argv[])
 			material_out.pbrMetallicRoughness.roughnessFactor = material_mid.roughness;
 		}
 	}
+
+	auto iter = node_skin_map.begin();
+	while (iter != node_skin_map.end())
+	{
+		int node_idx = iter->first;
+		std::string skin_path = iter->second;
+		int skin_idx = skin_map[skin_path];
+		m_out.nodes[node_idx].skin = skin_idx;
+		iter++;
+	}
+	
 
 	tinygltf::TinyGLTF gltf;
 	gltf.WriteGltfSceneToFile(&m_out, argv[2], true, true, false, true);
