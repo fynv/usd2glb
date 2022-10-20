@@ -855,9 +855,10 @@ int main(int argc, char* argv[])
 			tinygltf::Animation& anim_out = m_out.animations[id_anim];
 			anim_out.name = anim_in->name;
 
+			bool has_translations = anim_in->translations.GetValue().has_value();
 			bool has_rotations = anim_in->rotations.GetValue().has_value();
 			bool has_scales = anim_in->scales.GetValue().has_value();
-			bool has_translations = anim_in->translations.GetValue().has_value();
+			
 
 			auto joints = anim_in->joints.GetValue().value();
 			for (size_t i = 0; i < joints.size(); i++)
@@ -866,6 +867,93 @@ int main(int argc, char* argv[])
 				auto iter = joint_map.find(joint_path);
 				if (iter == joint_map.end()) continue;
 				int id_node = joint_map[joint_path];
+
+				if (has_translations)
+				{
+					auto translations = anim_in->translations.GetValue().value().ts.GetSamples();
+
+					int id_channel = (int)anim_out.channels.size();
+					anim_out.channels.resize(id_channel + 1);
+					tinygltf::AnimationChannel& channel = anim_out.channels[id_channel];
+					channel.target_node = id_node;
+					channel.target_path = "translation";
+
+					int id_sampler = (int)anim_out.samplers.size();
+					channel.sampler = id_sampler;
+
+					anim_out.samplers.resize(id_sampler + 1);
+					tinygltf::AnimationSampler& sampler = anim_out.samplers[id_sampler];
+
+					std::vector<float> times(translations.size());
+					std::vector<glm::vec3> values(translations.size());
+
+					for (size_t j = 0; j < translations.size(); j++)
+					{
+						times[j] = (float)(translations[j].t / time_codes_per_sec);
+						auto tran_in = translations[j].value[i];
+						values[j] = glm::vec3(tran_in[0], tran_in[1], tran_in[2]);
+					}
+
+					float t0 = times[0];
+					float t1 = times[times.size() - 1];
+
+					offset = buf_out.data.size();
+					length = sizeof(float) * times.size();
+					buf_out.data.resize(offset + length);
+					memcpy(buf_out.data.data() + offset, times.data(), length);
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = times.size();
+						acc.type = TINYGLTF_TYPE_SCALAR;
+						acc.minValues = { t0 };
+						acc.maxValues = { t1 };
+						m_out.accessors.push_back(acc);
+					}
+
+					sampler.input = acc_id;
+
+					offset = buf_out.data.size();
+					length = sizeof(glm::vec3) * values.size();
+					buf_out.data.resize(offset + length);
+					memcpy(buf_out.data.data() + offset, values.data(), length);
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = values.size();
+						acc.type = TINYGLTF_TYPE_VEC3;
+						m_out.accessors.push_back(acc);
+					}
+
+					sampler.output = acc_id;
+
+				}
 
 				if (has_rotations)
 				{
@@ -961,6 +1049,7 @@ int main(int argc, char* argv[])
 
 				}
 
+#if 0
 				if (has_scales)
 				{
 					auto scales = anim_in->scales.GetValue().value().ts.GetSamples();					
@@ -1047,92 +1136,7 @@ int main(int argc, char* argv[])
 					sampler.output = acc_id;
 				}
 
-				if (has_translations)
-				{
-					auto translations = anim_in->translations.GetValue().value().ts.GetSamples();					
-
-					int id_channel = (int)anim_out.channels.size();
-					anim_out.channels.resize(id_channel + 1);
-					tinygltf::AnimationChannel& channel = anim_out.channels[id_channel];
-					channel.target_node = id_node;
-					channel.target_path = "translation";
-
-					int id_sampler = (int)anim_out.samplers.size();
-					channel.sampler = id_sampler;
-
-					anim_out.samplers.resize(id_sampler + 1);
-					tinygltf::AnimationSampler& sampler = anim_out.samplers[id_sampler];
-
-					std::vector<float> times(translations.size());
-					std::vector<glm::vec3> values(translations.size());
-
-					for (size_t j = 0; j < translations.size(); j++)
-					{
-						times[j] = (float)(translations[j].t / time_codes_per_sec);
-						auto tran_in = translations[j].value[i];
-						values[j] = glm::vec3(tran_in[0], tran_in[1], tran_in[2]);
-					}
-
-					float t0 = times[0];
-					float t1 = times[times.size() - 1];
-
-					offset = buf_out.data.size();
-					length = sizeof(float) * times.size();
-					buf_out.data.resize(offset + length);
-					memcpy(buf_out.data.data() + offset, times.data(), length);
-
-					view_id = m_out.bufferViews.size();
-					{
-						tinygltf::BufferView view;
-						view.buffer = 0;
-						view.byteOffset = offset;
-						view.byteLength = length;
-						m_out.bufferViews.push_back(view);
-					}
-
-					acc_id = m_out.accessors.size();
-					{
-						tinygltf::Accessor acc;
-						acc.bufferView = view_id;
-						acc.byteOffset = 0;
-						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-						acc.count = times.size();
-						acc.type = TINYGLTF_TYPE_SCALAR;
-						acc.minValues = { t0 };
-						acc.maxValues = { t1 };
-						m_out.accessors.push_back(acc);
-					}
-
-					sampler.input = acc_id;
-
-					offset = buf_out.data.size();
-					length = sizeof(glm::vec3) * values.size();
-					buf_out.data.resize(offset + length);
-					memcpy(buf_out.data.data() + offset, values.data(), length);
-
-					view_id = m_out.bufferViews.size();
-					{
-						tinygltf::BufferView view;
-						view.buffer = 0;
-						view.byteOffset = offset;
-						view.byteLength = length;
-						m_out.bufferViews.push_back(view);
-					}
-
-					acc_id = m_out.accessors.size();
-					{
-						tinygltf::Accessor acc;
-						acc.bufferView = view_id;
-						acc.byteOffset = 0;
-						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-						acc.count = values.size();
-						acc.type = TINYGLTF_TYPE_VEC3;
-						m_out.accessors.push_back(acc);
-					}
-
-					sampler.output = acc_id;
-
-				}
+#endif			
 
 			}
 
