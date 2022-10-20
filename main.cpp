@@ -103,50 +103,16 @@ int main(int argc, char* argv[])
 	};
 
 	std::queue<Prim> queue_prim;
+	
 	queue_prim.push({ root_prim, -1, ""});
-
 	while (!queue_prim.empty())
 	{
 		Prim prim = queue_prim.front();
 		queue_prim.pop();
 		std::string path = prim.base_path + "/" + prim.prim->element_path().full_path_name();		
 
-		if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_GEOM_XFORM)
-		{
-			auto* node_in = prim.prim->data().as<tinyusdz::Xform>();
-			int node_id = (int)m_out.nodes.size();
-
-			tinygltf::Node node_out;
-			node_out.name = node_in->name;
-
-			tinyusdz::value::matrix4d matrix;
-			node_in->EvaluateXformOps(&matrix, nullptr, nullptr);
-
-			glm::mat4 mat = *(glm::dmat4*)(&matrix);
-			glm::vec3 scale;
-			glm::quat rotation;
-			glm::vec3 translation;
-			
-			glm::vec3 skew;
-			glm::vec4 persp;
-			glm::decompose(mat, scale, rotation, translation, skew, persp);
-
-			node_out.translation = { translation.x, translation.y, translation.z };
-			node_out.rotation = { rotation.x, rotation.y, rotation.z, rotation.w };
-			node_out.scale = { scale.x, scale.y, scale.z };
-
-			m_out.nodes.push_back(node_out);
-			if (prim.id_node_base >= 0)
-			{
-				m_out.nodes[prim.id_node_base].children.push_back(node_id);
-			}
-			else
-			{
-				scene_out.nodes.push_back(node_id);
-			}
-			
-		}
-		else if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_MATERIAL)
+		
+		if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_MATERIAL)
 		{
 			Mid::Material material_mid;
 
@@ -244,6 +210,60 @@ int main(int argc, char* argv[])
 			material_map[path] = idx;
 
 		}
+		
+		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL)
+		{
+			int id_node_base = (int)(m_out.nodes.size() - 1);
+			size_t num_children = prim.prim->children().size();
+			for (size_t i = 0; i < num_children; i++)
+			{
+				queue_prim.push({ &prim.prim->children()[i],id_node_base, path });
+			}
+		}
+	}
+
+	queue_prim.push({ root_prim, -1, "" });
+	while (!queue_prim.empty())
+	{
+		Prim prim = queue_prim.front();
+		queue_prim.pop();
+		std::string path = prim.base_path + "/" + prim.prim->element_path().full_path_name();
+
+		if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_GEOM_XFORM)
+		{
+			auto* node_in = prim.prim->data().as<tinyusdz::Xform>();
+			int node_id = (int)m_out.nodes.size();
+
+			tinygltf::Node node_out;
+			node_out.name = node_in->name;
+
+			tinyusdz::value::matrix4d matrix;
+			node_in->EvaluateXformOps(&matrix, nullptr, nullptr);
+
+			glm::mat4 mat = *(glm::dmat4*)(&matrix);
+			glm::vec3 scale;
+			glm::quat rotation;
+			glm::vec3 translation;
+
+			glm::vec3 skew;
+			glm::vec4 persp;
+			glm::decompose(mat, scale, rotation, translation, skew, persp);
+
+			node_out.translation = { translation.x, translation.y, translation.z };
+			node_out.rotation = { rotation.x, rotation.y, rotation.z, rotation.w };
+			node_out.scale = { scale.x, scale.y, scale.z };
+
+			m_out.nodes.push_back(node_out);
+			if (prim.id_node_base >= 0)
+			{
+				m_out.nodes[prim.id_node_base].children.push_back(node_id);
+			}
+			else
+			{
+				scene_out.nodes.push_back(node_id);
+			}
+
+		}		
 		else if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_GEOM_MESH)
 		{
 			auto* mesh_in = prim.prim->data().as<tinyusdz::GeomMesh>();
@@ -292,7 +312,7 @@ int main(int argc, char* argv[])
 			material_mid.double_sided = mesh_in->doubleSided.GetValue();
 
 			prim_out.material = idx_material;
-			
+
 			auto points = mesh_in->points.GetValue().value().value;
 			auto extent = mesh_in->extent.GetValue().value().value;
 
@@ -424,7 +444,7 @@ int main(int argc, char* argv[])
 			if (iter != mesh_in->props.end())
 			{
 				auto uv = iter->second.GetAttrib().get_value<std::vector<tinyusdz::value::float2>>().value();
-				
+
 				offset = buf_out.data.size();
 				length = uv.size() * sizeof(glm::vec2);
 				buf_out.data.resize(offset + length);
@@ -465,29 +485,29 @@ int main(int argc, char* argv[])
 			if (iter_ji != mesh_in->props.end() && iter_jw != mesh_in->props.end())
 			{
 				std::string skel_path = mesh_in->skeleton.value().full_path_name();
-				node_skin_map[node_id] = skel_path;				
+				node_skin_map[node_id] = skel_path;
 
 				auto ji = iter_ji->second.GetAttrib().get_value<std::vector<int>>().value();
 				auto jw = iter_jw->second.GetAttrib().get_value<std::vector<float>>().value();
 
 				unsigned elem_size = iter_ji->second.GetAttrib().meta.elementSize.value();
-				size_t count = ji.size() / elem_size;				
+				size_t count = ji.size() / elem_size;
 
 				std::vector<glm::u8vec4> conv_ji(count, { 0,0,0,0 });
 				std::vector<glm::vec4> conv_jw(count, { 0.0f, 0.0f, 0.0f, 0.0f });
-				
+
 				for (size_t i = 0; i < count; i++)
 				{
 					unsigned elems = 4;
 					if (elem_size < elems) elems = elem_size;
 					for (unsigned j = 0; j < elems; j++)
 					{
-						size_t idx = elem_size * i + j;						
+						size_t idx = elem_size * i + j;
 						conv_ji[i][j] = (uint8_t)ji[idx];
 						conv_jw[i][j] = jw[idx];
 					}
 				}
-				
+
 				offset = buf_out.data.size();
 				length = sizeof(glm::u8vec4) * count;
 				buf_out.data.resize(offset + length);
@@ -546,28 +566,23 @@ int main(int argc, char* argv[])
 
 			}
 
-			
+
 			prim_out.mode = TINYGLTF_MODE_TRIANGLES;
 			m_out.meshes.push_back(mesh_out);
 
-		}
-
-		else if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_SKEL_ROOT)
-		{
-			auto* skel_root_in = prim.prim->data().as<tinyusdz::SkelRoot>();
-		}
+		}		
 		else if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_SKELETON)
 		{
 			int skin_idx = (int)m_out.skins.size();
 			m_out.skins.resize(skin_idx + 1);
 			tinygltf::Skin& skin_out = m_out.skins[skin_idx];
 			skin_out.skeleton = prim.id_node_base;
-			skin_map[path] = skin_idx;			
+			skin_map[path] = skin_idx;
 
-			auto* skel_in = prim.prim->data().as<tinyusdz::Skeleton>();			
+			auto* skel_in = prim.prim->data().as<tinyusdz::Skeleton>();
 			auto bindTrans = skel_in->bindTransforms.GetValue().value();
 			auto joints = skel_in->joints.GetValue().value();
-			auto restTrans = skel_in->restTransforms.GetValue().value();		
+			auto restTrans = skel_in->restTransforms.GetValue().value();
 
 			std::vector<glm::mat4> inv_binding_matrices(bindTrans.size());
 
@@ -611,7 +626,7 @@ int main(int argc, char* argv[])
 				if (pos == std::string::npos)
 				{
 					node_out.name = path;
-					m_out.nodes[prim.id_node_base].children.push_back(node_id);					
+					m_out.nodes[prim.id_node_base].children.push_back(node_id);
 				}
 				else
 				{
@@ -622,7 +637,7 @@ int main(int argc, char* argv[])
 				m_out.nodes.push_back(node_out);
 
 			}
-			
+
 			offset = buf_out.data.size();
 			length = sizeof(glm::mat4) * inv_binding_matrices.size();
 			buf_out.data.resize(offset + length);
@@ -668,7 +683,7 @@ int main(int argc, char* argv[])
 	for (size_t i = 0; i < material_lst.size(); i++)
 	{
 		auto& material = material_lst[i];
-		if (material.diffuse_tex!="")
+		if (material.diffuse_tex != "")
 		{
 			auto& iter = tex_map.find(material.diffuse_tex);
 			if (iter == tex_map.end())
@@ -676,9 +691,9 @@ int main(int argc, char* argv[])
 				int idx = (int)tex_lst.size();
 				tex_lst.resize(idx + 1);
 
-				Mid::Image& img = tex_lst[idx];				
+				Mid::Image& img = tex_lst[idx];
 				img.Load(material.diffuse_tex.c_str());
-			
+
 				tex_map[material.diffuse_tex] = idx;
 				material.idx_diffuse = idx;
 			}
@@ -686,7 +701,7 @@ int main(int argc, char* argv[])
 			{
 				material.idx_diffuse = iter->second;
 			}
-			
+
 		}
 		if (material.emissive_tex != "")
 		{
@@ -696,7 +711,7 @@ int main(int argc, char* argv[])
 				int idx = (int)tex_lst.size();
 				tex_lst.resize(idx + 1);
 
-				Mid::Image& img = tex_lst[idx];				
+				Mid::Image& img = tex_lst[idx];
 				img.Load(material.emissive_tex.c_str());
 
 				tex_map[material.emissive_tex] = idx;
@@ -728,7 +743,7 @@ int main(int argc, char* argv[])
 
 			material.idx_metallic_roughness = idx;
 
-		}		
+		}
 	}
 
 	m_out.samplers.resize(1);
@@ -777,9 +792,9 @@ int main(int argc, char* argv[])
 		auto& material_mid = material_lst[i];
 		tinygltf::Material& material_out = m_out.materials[i];
 		material_out.name = material_mid.name;
-		material_out.doubleSided = material_mid.double_sided;		
-		
-		if (material_mid.idx_diffuse>=0)
+		material_out.doubleSided = material_mid.double_sided;
+
+		if (material_mid.idx_diffuse >= 0)
 		{
 			material_out.pbrMetallicRoughness.baseColorTexture.index = material_mid.idx_diffuse;
 		}
@@ -788,7 +803,7 @@ int main(int argc, char* argv[])
 			material_out.pbrMetallicRoughness.baseColorFactor = { material_mid.diffuse_color[0], material_mid.diffuse_color[1], material_mid.diffuse_color[2], 1.0f };
 		}
 
-		if (material_mid.idx_emissive>=0)
+		if (material_mid.idx_emissive >= 0)
 		{
 			material_out.emissiveTexture.index = material_mid.idx_emissive;
 		}
