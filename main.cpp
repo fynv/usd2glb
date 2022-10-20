@@ -71,6 +71,9 @@ int main(int argc, char* argv[])
 
 	//tinyusdz::usda::SaveAsUSDA("output.udsa", stage, &warn, &err);
 
+	double time_codes_per_sec = stage.GetMetas().timeCodesPerSecond.GetValue();
+
+
 	tinyusdz::Prim* root_prim = &stage.GetRootPrims()[0];
 
 	tinygltf::Model m_out;
@@ -91,10 +94,7 @@ int main(int argc, char* argv[])
 
 	std::vector<Mid::Material> material_lst;
 	std::unordered_map<std::string, int> material_map;
-	std::unordered_map<std::string, int> joint_map;
-	std::unordered_map<int, std::string> node_skin_map;
-	std::unordered_map<std::string, int> skin_map;
-
+	
 	struct Prim
 	{
 		tinyusdz::Prim* prim;
@@ -221,6 +221,10 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
+
+	std::unordered_map<std::string, int> joint_map;
+	std::unordered_map<int, std::string> node_skin_map;
+	std::unordered_map<std::string, int> skin_map;
 
 	queue_prim.push({ root_prim, -1, "" });
 	while (!queue_prim.empty())
@@ -833,6 +837,316 @@ int main(int argc, char* argv[])
 		int skin_idx = skin_map[skin_path];
 		m_out.nodes[node_idx].skin = skin_idx;
 		iter++;
+	}
+
+	queue_prim.push({ root_prim, -1, "" });
+	while (!queue_prim.empty())
+	{
+		Prim prim = queue_prim.front();
+		queue_prim.pop();
+		std::string path = prim.base_path + "/" + prim.prim->element_path().full_path_name();
+
+		if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_SKELANIMATION)
+		{
+			auto* anim_in = prim.prim->data().as<tinyusdz::SkelAnimation>();
+			int id_anim = (int)m_out.animations.size();
+			m_out.animations.resize(id_anim + 1);
+			
+			tinygltf::Animation& anim_out = m_out.animations[id_anim];
+			anim_out.name = anim_in->name;
+
+			bool has_rotations = anim_in->rotations.GetValue().has_value();
+			bool has_scales = anim_in->scales.GetValue().has_value();
+			bool has_translations = anim_in->translations.GetValue().has_value();
+
+			auto joints = anim_in->joints.GetValue().value();
+			for (size_t i = 0; i < joints.size(); i++)
+			{
+				std::string joint_path = joints[i].str();
+				auto iter = joint_map.find(joint_path);
+				if (iter == joint_map.end()) continue;
+				int id_node = joint_map[joint_path];
+
+				if (has_rotations)
+				{
+					auto rotations = anim_in->rotations.GetValue().value().ts.GetSamples();							
+
+					int id_channel = (int)anim_out.channels.size();
+					anim_out.channels.resize(id_channel + 1);
+					tinygltf::AnimationChannel& channel = anim_out.channels[id_channel];
+					channel.target_node = id_node;
+					channel.target_path = "rotation";
+
+					int id_sampler = (int)anim_out.samplers.size();
+					channel.sampler = id_sampler;
+
+					anim_out.samplers.resize(id_sampler + 1);
+					tinygltf::AnimationSampler& sampler = anim_out.samplers[id_sampler];
+					
+					std::vector<float> times(rotations.size());
+					std::vector<glm::quat> values(rotations.size());
+
+					for (size_t j = 0; j < rotations.size(); j++)
+					{
+						times[j] = (float)(rotations[j].t / time_codes_per_sec);
+						auto rot_in = rotations[j].value[i];
+						values[j] = glm::quat(rot_in.real, rot_in.imag[0], rot_in.imag[1], rot_in.imag[2]);
+					}
+
+					float t0 = times[0];
+					float t1 = times[times.size() - 1];
+
+					offset = buf_out.data.size();
+					length = sizeof(float) * times.size();
+					buf_out.data.resize(offset + length);
+					memcpy(buf_out.data.data() + offset, times.data(), length);
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = times.size();
+						acc.type = TINYGLTF_TYPE_SCALAR;
+						acc.minValues = { t0 };
+						acc.maxValues = { t1 };
+						m_out.accessors.push_back(acc);
+					}
+					sampler.input = acc_id;
+
+					offset = buf_out.data.size();
+					length = sizeof(float) * 4 * values.size();
+					buf_out.data.resize(offset + length);
+					for (size_t k = 0; k < values.size(); k++)
+					{
+						float* p_out = (float*)(buf_out.data.data() + offset) + k * 4;
+						glm::quat rot = values[k];
+						p_out[0] = rot.x;
+						p_out[1] = rot.y;
+						p_out[2] = rot.z;
+						p_out[3] = rot.w;
+					}
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = values.size();
+						acc.type = TINYGLTF_TYPE_VEC4;
+						m_out.accessors.push_back(acc);
+					}
+
+					sampler.output = acc_id;
+
+				}
+
+				if (has_scales)
+				{
+					auto scales = anim_in->scales.GetValue().value().ts.GetSamples();					
+
+					int id_channel = (int)anim_out.channels.size();
+					anim_out.channels.resize(id_channel + 1);
+					tinygltf::AnimationChannel& channel = anim_out.channels[id_channel];
+					channel.target_node = id_node;
+					channel.target_path = "scale";
+
+					int id_sampler = (int)anim_out.samplers.size();
+					channel.sampler = id_sampler;
+
+					anim_out.samplers.resize(id_sampler + 1);
+					tinygltf::AnimationSampler& sampler = anim_out.samplers[id_sampler];
+
+					std::vector<float> times(scales.size());
+					std::vector<glm::vec3> values(scales.size());
+
+					for (size_t j = 0; j < scales.size(); j++)
+					{
+						times[j] = (float)(scales[j].t / time_codes_per_sec);
+						auto scale_in = scales[j].value[i];
+						values[j] = glm::vec3(half_to_float(scale_in[0]), half_to_float(scale_in[1]), half_to_float(scale_in[2]));
+					}
+
+					float t0 = times[0];
+					float t1 = times[times.size() - 1];
+
+					offset = buf_out.data.size();
+					length = sizeof(float) * times.size();
+					buf_out.data.resize(offset + length);
+					memcpy(buf_out.data.data() + offset, times.data(), length);
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = times.size();
+						acc.type = TINYGLTF_TYPE_SCALAR;
+						acc.minValues = { t0 };
+						acc.maxValues = { t1 };
+						m_out.accessors.push_back(acc);
+					}
+
+					sampler.input = acc_id;
+
+					offset = buf_out.data.size();
+					length = sizeof(glm::vec3) * values.size();
+					buf_out.data.resize(offset + length);
+					memcpy(buf_out.data.data() + offset, values.data(), length);
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = values.size();
+						acc.type = TINYGLTF_TYPE_VEC3;
+						m_out.accessors.push_back(acc);
+					}
+
+					sampler.output = acc_id;
+				}
+
+				if (has_translations)
+				{
+					auto translations = anim_in->translations.GetValue().value().ts.GetSamples();					
+
+					int id_channel = (int)anim_out.channels.size();
+					anim_out.channels.resize(id_channel + 1);
+					tinygltf::AnimationChannel& channel = anim_out.channels[id_channel];
+					channel.target_node = id_node;
+					channel.target_path = "translation";
+
+					int id_sampler = (int)anim_out.samplers.size();
+					channel.sampler = id_sampler;
+
+					anim_out.samplers.resize(id_sampler + 1);
+					tinygltf::AnimationSampler& sampler = anim_out.samplers[id_sampler];
+
+					std::vector<float> times(translations.size());
+					std::vector<glm::vec3> values(translations.size());
+
+					for (size_t j = 0; j < translations.size(); j++)
+					{
+						times[j] = (float)(translations[j].t / time_codes_per_sec);
+						auto tran_in = translations[j].value[i];
+						values[j] = glm::vec3(tran_in[0], tran_in[1], tran_in[2]);
+					}
+
+					float t0 = times[0];
+					float t1 = times[times.size() - 1];
+
+					offset = buf_out.data.size();
+					length = sizeof(float) * times.size();
+					buf_out.data.resize(offset + length);
+					memcpy(buf_out.data.data() + offset, times.data(), length);
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = times.size();
+						acc.type = TINYGLTF_TYPE_SCALAR;
+						acc.minValues = { t0 };
+						acc.maxValues = { t1 };
+						m_out.accessors.push_back(acc);
+					}
+
+					sampler.input = acc_id;
+
+					offset = buf_out.data.size();
+					length = sizeof(glm::vec3) * values.size();
+					buf_out.data.resize(offset + length);
+					memcpy(buf_out.data.data() + offset, values.data(), length);
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = values.size();
+						acc.type = TINYGLTF_TYPE_VEC3;
+						m_out.accessors.push_back(acc);
+					}
+
+					sampler.output = acc_id;
+
+				}
+
+			}
+
+		}
+
+		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL)
+		{
+			int id_node_base = (int)(m_out.nodes.size() - 1);
+			size_t num_children = prim.prim->children().size();
+			for (size_t i = 0; i < num_children; i++)
+			{
+				queue_prim.push({ &prim.prim->children()[i],id_node_base, path });
+			}
+		}
 	}
 	
 
