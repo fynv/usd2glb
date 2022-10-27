@@ -18,7 +18,7 @@ void SimpleScene(tinyusdz::Stage *stage)
   xform.name = "root";
 
   tinyusdz::XformOp op;
-  op.op = tinyusdz::XformOp::OpType::Translate;
+  op.op_type = tinyusdz::XformOp::OpType::Translate;
   tinyusdz::value::double3 translate;
   translate[0] = 1.0;
   translate[1] = 2.0;
@@ -40,7 +40,7 @@ void SimpleScene(tinyusdz::Stage *stage)
 
     pts.push_back({0.0f, 1.0f, 0.0f});
 
-    mesh.points.SetValue(pts);
+    mesh.points.set_value(pts);
   }
 
   {
@@ -49,7 +49,7 @@ void SimpleScene(tinyusdz::Stage *stage)
     std::vector<int> counts;
     counts.push_back(3);
     counts.push_back(3);
-    mesh.faceVertexCounts.SetValue(counts);
+    mesh.faceVertexCounts.set_value(counts);
 
     indices.push_back(0);
     indices.push_back(1);
@@ -59,7 +59,7 @@ void SimpleScene(tinyusdz::Stage *stage)
     indices.push_back(2);
     indices.push_back(3);
 
-    mesh.faceVertexIndices.SetValue(indices);
+    mesh.faceVertexIndices.set_value(indices);
   }
 
   // primvar and custom attribute can be added to generic Property container `props`
@@ -70,7 +70,7 @@ void SimpleScene(tinyusdz::Stage *stage)
     // int[] primvars:uv:indices = [ ... ]
     //
     {
-      tinyusdz::PrimAttrib uvAttr;
+      tinyusdz::Attribute uvAttr;
       std::vector<tinyusdz::value::texcoord2f> uvs;
 
       uvs.push_back({0.0f, 0.0f});
@@ -78,14 +78,18 @@ void SimpleScene(tinyusdz::Stage *stage)
       uvs.push_back({1.0f, 1.0f});
       uvs.push_back({0.0f, 1.0f});
 
-      tinyusdz::primvar::PrimVar uvVar;
-      uvVar.set_scalar(uvs);
-      uvAttr.set_var(std::move(uvVar));
+      // Fast path. Set the value directly to Attribute.
+      uvAttr.set_value(uvs);
+
+      // or we can first build primvar::PrimVar
+      //tinyusdz::primvar::PrimVar uvVar;
+      //uvVar.set_scalar(uvs);
+      //uvAttr.set_var(std::move(uvVar));
 
       // Currently `interpolation` is described in Attribute metadataum.
       tinyusdz::AttrMeta meta;
       meta.interpolation = tinyusdz::Interpolation::Vertex;
-      uvAttr.meta = meta;
+      uvAttr.metas() = meta;
 
       tinyusdz::Property uvProp(uvAttr, /* custom*/false);
 
@@ -93,7 +97,7 @@ void SimpleScene(tinyusdz::Stage *stage)
 
       // ----------------------
 
-      tinyusdz::PrimAttrib uvIndexAttr;
+      tinyusdz::Attribute uvIndexAttr;
       std::vector<int> uvIndices;
 
       // FIXME: Validate
@@ -114,17 +118,17 @@ void SimpleScene(tinyusdz::Stage *stage)
 
     // `custom uniform double myvalue = 3.0 ( hidden = 0 )`
     {
-      tinyusdz::PrimAttrib attrib;
+      tinyusdz::Attribute attrib;
       double myvalue = 3.0;
       tinyusdz::primvar::PrimVar var;
       var.set_scalar(myvalue);
       attrib.set_var(std::move(var));
 
-      attrib.variability = tinyusdz::Variability::Uniform;
+      attrib.variability() = tinyusdz::Variability::Uniform;
 
       tinyusdz::AttrMeta meta;
       meta.hidden = false;
-      attrib.meta = meta;
+      attrib.metas() = meta;
 
       tinyusdz::Property prop(attrib, /* custom*/true);
 
@@ -142,7 +146,7 @@ void SimpleScene(tinyusdz::Stage *stage)
   //
   xformPrim.children().emplace_back(std::move(meshPrim));
 
-  stage->GetRootPrims().emplace_back(std::move(xformPrim));
+  stage->root_prims().emplace_back(std::move(xformPrim));
 }
 
 int main(int argc, char **argv)

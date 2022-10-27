@@ -19,7 +19,7 @@ namespace Mid
 		std::vector<uint8_t> code;
 
 		glm::u8vec4 Get(int x, int y) const;
-		glm::u8vec4 Image::Get(int x, int y, int width, int height) const;
+		glm::u8vec4 Get(int x, int y, int width, int height) const;
 
 		void Set(int x, int y, const glm::u8vec4& v);
 

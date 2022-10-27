@@ -76,7 +76,7 @@ std::ostream &operator<<(std::ostream &ofs, const tinyusdz::LayerOffset &v) {
 std::ostream &operator<<(std::ostream &ofs, const tinyusdz::Reference &v) {
 
   ofs << v.asset_path;
-  if (v.prim_path.IsValid()) {
+  if (v.prim_path.is_valid()) {
     ofs << v.prim_path;
   }
   ofs << v.layerOffset;
@@ -90,7 +90,7 @@ std::ostream &operator<<(std::ostream &ofs, const tinyusdz::Reference &v) {
 std::ostream &operator<<(std::ostream &ofs, const tinyusdz::Payload &v) {
 
   ofs << v.asset_path;
-  if (v._prim_path.IsValid()) {
+  if (v._prim_path.is_valid()) {
     ofs << v._prim_path;
   }
   ofs << v._layer_offset;
@@ -167,7 +167,7 @@ std::string print_typed_timesamples(const TypedTimeSamples<T> &v, const uint32_t
 
   ss << "{\n";
 
-  const auto &samples = v.GetSamples();
+  const auto &samples = v.get_samples();
 
   for (size_t i = 0; i < samples.size(); i++) {
     ss << pprint::Indent(indent+1) << samples[i].t << ": ";
@@ -190,7 +190,7 @@ std::string print_typed_token_timesamples(const TypedTimeSamples<T> &v, const ui
 
   ss << "{\n";
 
-  const auto &samples = v.GetSamples();
+  const auto &samples = v.get_samples();
 
   for (size_t i = 0; i < samples.size(); i++) {
     ss << pprint::Indent(indent+1) << samples[i].t << ": ";
@@ -211,12 +211,16 @@ template<typename T>
 std::string print_animatable(const Animatable<T> &v, const uint32_t indent = 0) {
   std::stringstream ss;
 
-  if (v.IsTimeSamples()) {
-    ss << print_typed_timesamples(v.ts, indent);
-  } else if (v.IsBlocked()) {
+  if (v.is_timesamples()) {
+    ss << print_typed_timesamples(v.get_timesamples(), indent);
+  } else if (v.is_blocked()) {
     ss << "None";
-  } else if (v.IsScalar()) {
-    ss << v.value;
+  } else if (v.is_scalar()) {
+    T a;
+    if (!v.get_scalar(&a)) {
+      return "[Animatable: InternalError]";
+    }
+    ss << a;
   } else {
     return "[FIXME: Invalid Animatable]";
   }
@@ -228,12 +232,16 @@ template<typename T>
 std::string print_animatable_token(const Animatable<T> &v, const uint32_t indent = 0) {
   std::stringstream ss;
 
-  if (v.IsTimeSamples()) {
-    ss << print_typed_token_timesamples(v.ts, indent);
-  } else if (v.IsBlocked()) {
+  if (v.is_timesamples()) {
+    ss << print_typed_token_timesamples(v.get_timesamples(), indent);
+  } else if (v.is_blocked()) {
     ss << "None";
-  } else if (v.IsScalar()) {
-    ss << quote(to_string(v.value));
+  } else if (v.is_scalar()) {
+    T a;
+    if (!v.get_scalar(&a)) {
+      return "[Animatable: InternalError]";
+    }
+    ss << quote(to_string(a));
   } else {
     return "[FIXME: Invalid Animatable]";
   }
@@ -268,19 +276,19 @@ std::string print_references(const prim::ReferenceList &references, const uint32
   return ss.str();
 }
 
-std::string print_rel(const Relation &rel, const std::string &name, uint32_t indent)
+std::string print_rel(const Relationship &rel, const std::string &name, uint32_t indent)
 {
   std::stringstream ss;
 
   ss << "rel " << name;
 
-  if (rel.IsEmpty()) {
+  if (rel.is_empty()) {
     // nothing todo
-  } else if (rel.IsPath()) {
+  } else if (rel.is_path()) {
     ss << " = " << rel.targetPath;
-  } else if (rel.IsPathVector()) {
+  } else if (rel.is_pathvector()) {
     ss << " = " << rel.targetPathVector;
-  } else if (rel.IsString()) {
+  } else if (rel.is_string()) {
     ss << " = " << quote(rel.targetString);
   } else {
     ss << "[InternalErrror]";
@@ -498,11 +506,11 @@ std::string print_typed_attr(const TypedAttribute<Animatable<T>> &attr, const st
 
     ss << value::TypeTraits<T>::type_name() << " " << name;
 
-    if (attr.IsBlocked()) {
+    if (attr.is_blocked()) {
       ss << " = None";
-    } else if (attr.IsConnection()) {
+    } else if (attr.is_connection()) {
       ss << ".connect = ";
-      const std::vector<Path> &paths = attr.GetConnections();
+      const std::vector<Path> &paths = attr.get_connections();
       if (paths.size() == 1) {
         ss << paths[0];
       } else if (paths.size() == 0) {
@@ -512,19 +520,24 @@ std::string print_typed_attr(const TypedAttribute<Animatable<T>> &attr, const st
       }
 
     } else {
-      auto pv = attr.GetValue();
+      auto pv = attr.get_value();
 
       if (pv) {
-        if (pv.value().IsTimeSamples()) {
-          ss << ".timeSamples = " << print_typed_timesamples(pv.value().ts, indent+1);
+        if (pv.value().is_timesamples()) {
+          ss << ".timeSamples = " << print_typed_timesamples(pv.value().get_timesamples(), indent+1);
         } else {
-          ss << " = " << pv.value().value;
+          T a;
+          if (pv.value().get_scalar(&a)) {
+            ss << " = " << a;
+          } else {
+            ss << " = [InternalError]";
+          } 
         }
       }
     }
 
-    if (attr.meta.authored()) {
-      ss << " (\n" << print_attr_metas(attr.meta, indent + 1) << pprint::Indent(indent) << ")";
+    if (attr.metas().authored()) {
+      ss << " (\n" << print_attr_metas(attr.metas(), indent + 1) << pprint::Indent(indent) << ")";
     }
     ss << "\n";
   }
@@ -544,11 +557,11 @@ std::string print_typed_token_attr(const TypedAttribute<Animatable<T>> &attr, co
 
     ss << "token " << name;
 
-    if (attr.IsBlocked()) {
+    if (attr.is_blocked()) {
       ss << " = None";
     } else if (!attr.define_only) {
       ss << " = ";
-      if (attr.value.value().IsTimeSamples()) {
+      if (attr.value.value().is_timesamples()) {
         ss << print_token_timesamples(attr.value.value().ts, indent+1);
       } else {
         ss << quote(to_string(attr.value.value().value));
@@ -580,12 +593,12 @@ std::string print_typed_attr(const TypedAttribute<T> &attr, const std::string &n
     ss << value::TypeTraits<T>::type_name() << " " << name;
 
 
-    if (attr.IsBlocked()) {
+    if (attr.is_blocked()) {
       ss << " = None";
-    } else if (attr.IsConnection()) {
+    } else if (attr.is_connection()) {
 
       ss << ".connect = ";
-      const std::vector<Path> &paths = attr.GetConnections();
+      const std::vector<Path> &paths = attr.get_connections();
       if (paths.size() == 1) {
         ss << paths[0];
       } else if (paths.size() == 0) {
@@ -593,18 +606,18 @@ std::string print_typed_attr(const TypedAttribute<T> &attr, const std::string &n
       } else {
         ss << paths;
       }
-    } else if (attr.IsValueEmpty()) {
+    } else if (attr.is_value_empty()) {
       // nothing to do
 
     } else {
-      auto pv = attr.GetValue();
+      auto pv = attr.get_value();
       if (pv) {
         ss << " = " << pv.value();
       }
     }
 
-    if (attr.meta.authored()) {
-      ss << " (\n" << print_attr_metas(attr.meta, indent + 1) << pprint::Indent(indent) << ")";
+    if (attr.metas().authored()) {
+      ss << " (\n" << print_attr_metas(attr.metas(), indent + 1) << pprint::Indent(indent) << ")";
     }
     ss << "\n";
   }
@@ -627,7 +640,7 @@ std::string print_typed_token_attr(const TypedAttribute<T> &attr, const std::str
     ss << "uniform token " << name;
 
 
-    if (attr.IsBlocked()) {
+    if (attr.is_blocked()) {
       ss << " = None";
     } else {
       if (pv) {
@@ -656,10 +669,10 @@ std::string print_typed_attr(const TypedAttributeWithFallback<Animatable<T>> &at
 
     ss << value::TypeTraits<T>::type_name() << " " << name;
 
-    if (attr.IsConnection()) {
+    if (attr.is_connection()) {
       ss << ".connect = ";
 
-      const std::vector<Path> &paths = attr.GetConnections();
+      const std::vector<Path> &paths = attr.get_connections();
       if (paths.size() == 1) {
         ss << paths[0];
       } else if (paths.size() == 0) {
@@ -668,20 +681,20 @@ std::string print_typed_attr(const TypedAttributeWithFallback<Animatable<T>> &at
         ss << paths;
       }
 
-    } else if (attr.IsValueEmpty()) {
+    } else if (attr.is_value_empty()) {
       // nothing to do
     } else {
-      auto v = attr.GetValue();
+      auto v = attr.get_value();
 
-      if (v.IsTimeSamples()) {
+      if (v.is_timesamples()) {
         ss << ".timeSamples";
       }
 
       ss << " = " <<  print_animatable(v, indent+1);
     }
 
-    if (attr.meta.authored()) {
-      ss << " (\n" << print_attr_metas(attr.meta, indent + 1) << pprint::Indent(indent) << ")";
+    if (attr.metas().authored()) {
+      ss << " (\n" << print_attr_metas(attr.metas(), indent + 1) << pprint::Indent(indent) << ")";
     }
     ss << "\n";
   }
@@ -700,8 +713,8 @@ std::string print_typed_terminal_attr(const TypedTerminalAttribute<T> &attr, con
 
     ss << value::TypeTraits<T>::type_name() << " " << name;
 
-    if (attr.meta.authored()) {
-      ss << " (\n" << print_attr_metas(attr.meta, indent + 1) << pprint::Indent(indent) << ")";
+    if (attr.metas().authored()) {
+      ss << " (\n" << print_attr_metas(attr.metas(), indent + 1) << pprint::Indent(indent) << ")";
     }
     ss << "\n";
   }
@@ -722,12 +735,12 @@ std::string print_typed_attr(const TypedAttributeWithFallback<T> &attr, const st
 
     ss << value::TypeTraits<T>::type_name() << " " << name;
 
-    if (attr.IsBlocked()) {
+    if (attr.is_blocked()) {
       ss << " = None";
-    } else if (attr.IsConnection()) {
+    } else if (attr.is_connection()) {
       ss << ".connect = ";
 
-      const std::vector<Path> &paths = attr.GetConnections();
+      const std::vector<Path> &paths = attr.get_connections();
       if (paths.size() == 1) {
         ss << paths[0];
       } else if (paths.size() == 0) {
@@ -736,11 +749,11 @@ std::string print_typed_attr(const TypedAttributeWithFallback<T> &attr, const st
         ss << paths;
       }
     } else {
-      ss << " = " << attr.GetValue();
+      ss << " = " << attr.get_value();
     }
 
-    if (attr.meta.authored()) {
-      ss << " (\n" << print_attr_metas(attr.meta, indent + 1) << pprint::Indent(indent) << ")";
+    if (attr.metas().authored()) {
+      ss << " (\n" << print_attr_metas(attr.metas(), indent + 1) << pprint::Indent(indent) << ")";
     }
     ss << "\n";
   }
@@ -755,14 +768,14 @@ std::string print_typed_token_attr(const TypedAttributeWithFallback<Animatable<T
 
   if (attr.authored()) {
 
-    if (attr.IsConnection()) {
+    if (attr.is_connection()) {
 
       ss << pprint::Indent(indent);
 
       ss << "token " << name;
 
       ss << ".connect = ";
-      const std::vector<Path> &paths = attr.GetConnections();
+      const std::vector<Path> &paths = attr.get_connections();
       if (paths.size() == 1) {
         ss << paths[0];
       } else if (paths.size() == 0) {
@@ -772,21 +785,21 @@ std::string print_typed_token_attr(const TypedAttributeWithFallback<Animatable<T
       }
 
     } else {
-      auto v = attr.GetValue();
+      auto v = attr.get_value();
 
       ss << pprint::Indent(indent);
 
       ss << "token " << name;
 
-      if (v.IsTimeSamples()) {
+      if (v.is_timesamples()) {
         ss << ".timeSamples";
       }
 
       ss << " = " <<  print_animatable_token(v, indent+1);
     }
 
-    if (attr.meta.authored()) {
-      ss << " (\n" << print_attr_metas(attr.meta, indent + 1) << pprint::Indent(indent) << ")";
+    if (attr.metas().authored()) {
+      ss << " (\n" << print_attr_metas(attr.metas(), indent + 1) << pprint::Indent(indent) << ")";
     }
     ss << "\n";
   }
@@ -801,13 +814,13 @@ std::string print_typed_token_attr(const TypedAttributeWithFallback<T> &attr, co
 
   if (attr.authored()) {
 
-    if (attr.IsConnection()) {
+    if (attr.is_connection()) {
       ss << pprint::Indent(indent);
 
       ss << "token " << name;
 
       ss << ".connect = ";
-      const std::vector<Path> &paths = attr.GetConnections();
+      const std::vector<Path> &paths = attr.get_connections();
       if (paths.size() == 1) {
         ss << paths[0];
       } else if (paths.size() == 0) {
@@ -821,15 +834,15 @@ std::string print_typed_token_attr(const TypedAttributeWithFallback<T> &attr, co
 
       ss << "uniform token " << name;
 
-      if (attr.IsBlocked()) {
+      if (attr.is_blocked()) {
         ss << " = None";
       } else {
-        ss << " = " << quote(to_string(attr.GetValue()));
+        ss << " = " << quote(to_string(attr.get_value()));
       }
     }
 
-    if (attr.meta.authored()) {
-      ss << " (\n" << print_attr_metas(attr.meta, indent + 1) << pprint::Indent(indent) << ")";
+    if (attr.metas().authored()) {
+      ss << " (\n" << print_attr_metas(attr.metas(), indent + 1) << pprint::Indent(indent) << ")";
     }
     ss << "\n";
   }
@@ -840,24 +853,14 @@ std::string print_typed_token_attr(const TypedAttributeWithFallback<T> &attr, co
 std::string print_timesamples(const value::TimeSamples &v, const uint32_t indent) {
   std::stringstream ss;
 
-  if (v.IsScalar()) {
-    ss << value::pprint_value(v.values[0]);
-  } else {
+  ss << "{\n";
 
-    if (!v.ValidTimeSamples()) {
-      return "[Invalid TimeSamples data(internal error?)]";
-    }
-
-    ss << "{\n";
-
-    for (size_t i = 0; i < v.times.size(); i++) {
-
-      ss << pprint::Indent(indent+1);
-      ss << v.times[i] << ": " << value::pprint_value(v.values[i]);
-      ss << ",\n"; // USDA allow ',' for the last item
-    }
-    ss << pprint::Indent(indent) << "}\n";
+  for (size_t i = 0; i < v.size(); i++) {
+    ss << pprint::Indent(indent+1);
+    ss << v.get_samples()[i].t << ": " << value::pprint_value(v.get_samples()[i].value);
+    ss << ",\n"; // USDA allow ',' for the last item
   }
+  ss << pprint::Indent(indent) << "}\n";
 
   return ss.str();
 }
@@ -867,52 +870,89 @@ std::string print_rel_prop(const Property &prop, const std::string &name, uint32
 {
   std::stringstream ss;
 
-  if (!prop.IsRel()) {
+  if (!prop.is_relationship()) {
     return ss.str();
   }
 
   ss << pprint::Indent(indent);
 
-  if (prop.HasCustom()) {
+  if (prop.has_custom()) {
     ss << "custom ";
   }
 
   // List editing
-  if (prop.GetListEditQual() != ListEditQual::ResetToExplicit) {
-    ss << to_string(prop.GetListEditQual()) << " ";
+  if (prop.get_listedit_qual() != ListEditQual::ResetToExplicit) {
+    ss << to_string(prop.get_listedit_qual()) << " ";
   }
 
-#if 0
-  ss << "rel " << name;
-
-  const Relation &rel = prop.GetRelation();
-
-  if (rel.IsEmpty()) {
-    // nothing todo
-  } else if (rel.IsPath()) {
-    ss << " = " << rel.targetPath;
-  } else if (rel.IsPathVector()) {
-    ss << " = " << rel.targetPathVector;
-  } else if (rel.IsString()) {
-    ss << " = " << quote(rel.targetString);
-  } else {
-    ss << "[InternalErrror]";
-  }
-
-  // Metadata is stored in attrib.meta.
-  if (rel.meta.authored()) {
-    ss << " (\n" << print_attr_metas(rel.meta, indent+1) << pprint::Indent(indent) << ")";
-  }
-
-  ss << "\n";
-#else
-  const Relation &rel = prop.GetRelation();
+  const Relationship &rel = prop.get_relationship();
   ss << print_rel(rel, name, indent);
-#endif
 
   return ss.str();
 }
 
+std::string print_prop(const Property &prop, const std::string &prop_name, uint32_t indent)
+{
+  std::stringstream ss;
+
+  if (prop.is_relationship()) {
+
+    ss << print_rel_prop(prop, prop_name, indent);
+
+  } else {
+    const Attribute &attr = prop.get_attribute();
+
+    ss << pprint::Indent(indent);
+
+    if (prop.has_custom()) {
+      ss << "custom ";
+    }
+
+    if (attr.variability() == Variability::Uniform) {
+      ss << "uniform ";
+    }
+
+    std::string ty;
+
+    ty = prop.value_type_name();
+    ss << ty << " " << prop_name;
+
+    if (prop.is_connection()) {
+
+      ss << ".connect = ";
+      if (prop.get_relationship().is_path()) {
+        ss << prop.get_relationship().targetPath;
+      } else if (prop.get_relationship().is_pathvector()) {
+        ss << prop.get_relationship().targetPathVector;
+      }
+    } else if (prop.is_empty()) {
+      ss << "\n";
+    } else {
+      // has value content
+
+      if (attr.get_var().is_timesamples()) {
+        ss << ".timeSamples";
+      }
+      ss << " = ";
+
+      if (attr.get_var().is_timesamples()) {
+        ss << print_timesamples(attr.get_var().ts_raw(), indent+1);
+      } else if (attr.get_var().is_blocked()) {
+        ss << "None";
+      } else {
+        // is_scalar
+        ss << value::pprint_value(attr.get_var().value_raw());
+      }
+    }
+
+    if (prop.get_attribute().metas().authored()) {
+      ss << " (\n" << print_attr_metas(prop.get_attribute().metas(), indent+1) << pprint::Indent(indent) << ")";
+    }
+    ss << "\n";
+  }
+
+  return ss.str();
+}
 
 // Print user-defined (custom) properties.
 std::string print_props(const std::map<std::string, Property> &props, uint32_t indent)
@@ -923,58 +963,8 @@ std::string print_props(const std::map<std::string, Property> &props, uint32_t i
 
     const Property &prop = item.second;
 
-    if (prop.IsRel()) {
+    ss << print_prop(prop, item.first, indent);
 
-      ss << print_rel_prop(prop, item.first, indent);
-
-    } else {
-      const PrimAttrib &attr = item.second.GetAttrib();
-
-      ss << pprint::Indent(indent);
-
-
-      if (prop.HasCustom()) {
-        ss << "custom ";
-      }
-
-      if (attr.variability == Variability::Uniform) {
-        ss << "uniform ";
-      }
-
-      std::string ty;
-
-      ty = item.second.value_type_name();
-      ss << ty << " " << item.first;
-
-      if (prop.IsConnection()) {
-
-        // Currently, ".connect" prefix included in property's name
-
-        ss << " = ";
-        if (prop.GetRelation().IsPath()) {
-          ss << prop.GetRelation().targetPath;
-        } else if (prop.GetRelation().IsPathVector()) {
-          ss << prop.GetRelation().targetPathVector;
-        }
-      } else if (prop.IsEmpty()) {
-        ss << "\n";
-      } else {
-        // has value content
-        ss << " = ";
-
-        if (attr.get_var().is_timesample()) {
-          ss << print_timesamples(attr.get_var().var, indent+1);
-        } else {
-          // is_scalar
-          ss << value::pprint_value(attr.get_var().var.values[0]);
-        }
-      }
-
-      if (item.second.GetAttrib().meta.authored()) {
-        ss << " (\n" << print_attr_metas(item.second.GetAttrib().meta, indent+1) << pprint::Indent(indent) << ")";
-      }
-      ss << "\n";
-    }
   }
 
   return ss.str();
@@ -996,7 +986,7 @@ std::string print_xformOpOrder(const std::vector<XformOp> &xformOps, const uint3
       if (xformOp.inverted) {
         ss << "!invert!";
       }
-      ss << to_string(xformOp.op);
+      ss << to_string(xformOp.op_type);
       if (!xformOp.suffix.empty()) {
         ss << ":" << xformOp.suffix;
       }
@@ -1019,7 +1009,7 @@ std::string print_xformOps(const std::vector<XformOp>& xformOps, const uint32_t 
     for (size_t i = 0; i < xformOps.size(); i++) {
       const auto xformOp = xformOps[i];
 
-      if (xformOp.op == XformOp::OpType::ResetXformStack) {
+      if (xformOp.op_type == XformOp::OpType::ResetXformStack) {
         // No need to print value.
         continue;
       }
@@ -1028,7 +1018,7 @@ std::string print_xformOps(const std::vector<XformOp>& xformOps, const uint32_t 
 
       ss << xformOp.get_value_type_name() << " " ;
 
-      ss << to_string(xformOp.op);
+      ss << to_string(xformOp.op_type);
       if (!xformOp.suffix.empty()) {
         ss << ":" << xformOp.suffix;
       }
@@ -1037,7 +1027,21 @@ std::string print_xformOps(const std::vector<XformOp>& xformOps, const uint32_t 
         ss << ".timeSamples";
       }
 
-      ss << " = " << print_timesamples(xformOp.var, indent);
+      ss << " = ";
+
+      if (xformOp.is_timesamples()) {
+        if (auto pv = xformOp.get_timesamples()) {
+          ss << print_timesamples(pv.value(), indent);
+        } else {
+          ss << "[InternalError]";
+        }
+      } else {
+        if (auto pv = xformOp.get_scalar()) {
+          ss << value::pprint_value(pv.value(), indent);
+        } else {
+          ss << "[InternalError]";
+        }
+      }
 
       ss << "\n";
     }
@@ -1063,7 +1067,7 @@ std::string print_gprim_predefined(const T &gprim, const uint32_t indent) {
 
   if (gprim.materialBinding) {
     auto m = gprim.materialBinding.value();
-    if (m.binding.IsValid()) {
+    if (m.binding.is_valid()) {
       ss << pprint::Indent(indent) << "rel material:binding = " << wquote(to_string(m.binding), "<", ">") << "\n";
     }
   }
@@ -1137,7 +1141,7 @@ std::string to_string(const Reference &v) {
   std::stringstream ss;
 
   ss << v.asset_path;
-  if (v.prim_path.IsValid()) {
+  if (v.prim_path.is_valid()) {
     ss << v.prim_path;
   }
 
@@ -1188,7 +1192,7 @@ std::string print_customData(const CustomDataType &customData, const std::string
 std::string print_meta(const MetaVariable &meta, const uint32_t indent) {
   std::stringstream ss;
 
-  //ss << "TODO: isObject " << meta.IsObject() << ", isValue " << meta.IsValue() << "\n";
+  //ss << "TODO: isObject " << meta.is_object() << ", isValue " << meta.IsValue() << "\n";
 
   if (auto pv = meta.Get<CustomDataType>()) {
     // dict
@@ -1243,6 +1247,29 @@ std::string to_string(tinyusdz::GeomMesh::FaceVaryingLinearInterpolation v) {
 
   return s;
 }
+
+std::string to_string(tinyusdz::GeomSubset::ElementType v) {
+  std::string s;
+
+  switch (v) {
+    case tinyusdz::GeomSubset::ElementType::Face: { s = "face"; break; }
+  }
+
+  return s;
+}
+
+std::string to_string(tinyusdz::GeomSubset::FamilyType v) {
+  std::string s;
+
+  switch (v) {
+    case tinyusdz::GeomSubset::FamilyType::Partition: { s = "partition"; break; }
+    case tinyusdz::GeomSubset::FamilyType::NonOverlapping: { s = "nonOverlapping"; break; }
+    case tinyusdz::GeomSubset::FamilyType::Unrestricted: { s = "unrestricted"; break; }
+  }
+
+  return s;
+}
+
 
 std::string to_string(const tinyusdz::UsdUVTexture::SourceColorSpace v) {
   std::string s;
@@ -1481,7 +1508,7 @@ std::string to_string(const tinyusdz::Klass &klass, uint32_t indent, bool closin
 
   for (auto prop : klass.props) {
 
-    if (prop.second.IsRel()) {
+    if (prop.second.is_relationship()) {
         ss << "TODO: Rel\n";
     } else {
       //const PrimAttrib &attrib = prop.second.GetAttrib();
@@ -1522,8 +1549,7 @@ std::string to_string(const Model &model, const uint32_t indent, bool closing_br
   ss << pprint::Indent(indent) << ")\n";
   ss << pprint::Indent(indent) << "{\n";
 
-  // props
-  // TODO:
+  ss << print_props(model.props,indent+1);
 
   if (closing_brace) {
     ss << pprint::Indent(indent) << "}\n";
@@ -1541,8 +1567,7 @@ std::string to_string(const Scope &scope, const uint32_t indent, bool closing_br
   ss << pprint::Indent(indent) << ")\n";
   ss << pprint::Indent(indent) << "{\n";
 
-  // props
-  // TODO:
+  ss << print_props(scope.props, indent+1);
 
   if (closing_brace) {
     ss << pprint::Indent(indent) << "}\n";
@@ -2191,7 +2216,7 @@ static std::string print_shader_params(const UsdPreviewSurface &shader, const ui
   // Outputs
   if (shader.outputsSurface) {
     ss << pprint::Indent(indent) << "token outputs:surface";
-    if (shader.outputsSurface.value().IsPath()) {
+    if (shader.outputsSurface.value().is_path()) {
       ss << ".connect = " << pquote(shader.outputsSurface.value().targetPath);
     }
     if (shader.outputsSurface.value().meta.authored()) {
@@ -2202,7 +2227,7 @@ static std::string print_shader_params(const UsdPreviewSurface &shader, const ui
 
   if (shader.outputsDisplacement) {
     ss << pprint::Indent(indent) << "token outputs:displacement";
-    if (shader.outputsDisplacement.value().IsPath()) {
+    if (shader.outputsDisplacement.value().is_path()) {
       ss << ".connect = " << pquote(shader.outputsDisplacement.value().targetPath) << "\n";
     }
     if (shader.outputsDisplacement.value().meta.authored()) {
@@ -2518,12 +2543,12 @@ std::string to_string(const tinyusdz::value::token &v) {
 
 std::string dump_path(const Path &path) {
   std::stringstream ss;
-  ss << "Path: Prim part = " << path.GetPrimPart();
-  ss << ", Prop part = " << path.GetPropPart();
+  ss << "Path: Prim part = " << path.prim_part();
+  ss << ", Prop part = " << path.prop_part();
   ss << ", elementName = " << path.element_name();
-  ss << ", isValid = " << path.IsValid();
-  ss << ", isAbsolute = " << path.IsAbsolutePath();
-  ss << ", isRelative = " << path.IsRelativePath();
+  ss << ", isValid = " << path.is_valid();
+  ss << ", isAbsolute = " << path.is_absolute_path();
+  ss << ", isRelative = " << path.is_relative_path();
 
   return ss.str();
 }
@@ -2533,7 +2558,7 @@ std::string dump_path(const Path &path) {
 namespace prim {
 
 std::string print_prim(const Prim &prim, const uint32_t indent) {
-  
+
   std::stringstream ss;
 
   ss << pprint::Indent(indent) << value::pprint_value(prim.data());

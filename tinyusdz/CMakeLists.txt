@@ -260,6 +260,7 @@ set(TINYUSDZ_SOURCES
     ${PROJECT_SOURCE_DIR}/src/io-util.cc
     ${PROJECT_SOURCE_DIR}/src/image-loader.cc
     ${PROJECT_SOURCE_DIR}/src/image-writer.cc
+    ${PROJECT_SOURCE_DIR}/src/linear-algebra.cc
     ${PROJECT_SOURCE_DIR}/src/usdGeom.cc
     ${PROJECT_SOURCE_DIR}/src/usdSkel.cc
     ${PROJECT_SOURCE_DIR}/src/usdShade.cc
@@ -701,6 +702,10 @@ if(TINYUSDZ_WITH_TOOL_USDA_PARSER AND TINYUSDZ_WITH_MODULE_USDA_READER)
   add_executable(
     usda_parser ${CMAKE_CURRENT_SOURCE_DIR}/examples/usda_parser/parser-main.cc)
   add_sanitizers(usda_parser)
+  if(TINYUSDZ_PRODUCTION_BUILD)
+    target_compile_definitions(usda_parser
+                               PRIVATE "TINYUSDZ_PRODUCTION_BUILD")
+  endif()
   target_include_directories(usda_parser PRIVATE ${PROJECT_SOURCE_DIR}/src/)
   target_link_libraries(usda_parser PRIVATE ${TINYUSDZ_TARGET_STATIC})
 endif()
@@ -709,6 +714,10 @@ if(TINYUSDZ_WITH_TOOL_USDC_PARSER AND TINYUSDZ_WITH_MODULE_USDC_READER)
   add_executable(
     usdc_parser ${CMAKE_CURRENT_SOURCE_DIR}/examples/usdc_parser/usdc-parser-main.cc)
   add_sanitizers(usdc_parser)
+  if(TINYUSDZ_PRODUCTION_BUILD)
+    target_compile_definitions(usdc_parser
+                               PRIVATE "TINYUSDZ_PRODUCTION_BUILD")
+  endif()
   target_include_directories(usdc_parser PRIVATE ${PROJECT_SOURCE_DIR}/src/)
   target_link_libraries(usdc_parser PRIVATE ${TINYUSDZ_TARGET_STATIC})
 endif()
@@ -728,6 +737,7 @@ endif()
 if(TINYUSDZ_BUILD_EXAMPLES)
   add_subdirectory(examples/simple_usdz_dump)
   add_subdirectory(examples/tydra_convert)
+  add_subdirectory(examples/api_tutorial)
   if(TINYUSDZ_WITH_MODULE_USDA_WRITER)
     add_subdirectory(examples/save_usda)
   endif()

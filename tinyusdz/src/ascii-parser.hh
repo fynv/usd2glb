@@ -104,7 +104,7 @@ class AsciiParser {
     ///
     std::vector<value::AssetPath> subLayers;  // 'subLayers'
     value::token defaultPrim;                 // 'defaultPrim'
-    StringData doc;                           // 'doc'
+    StringData doc;                           // 'doc' or 'documentation'
     nonstd::optional<Axis> upAxis;            // not specified = nullopt
     nonstd::optional<double> metersPerUnit;
     nonstd::optional<double> timeCodesPerSecond;
@@ -308,9 +308,21 @@ class AsciiParser {
 
 
   ///
+  /// Parse TimeSample value with specified array type of `type_id`(value::TypeId)
+  /// (You can obrain type_id from string using value::GetTypeId())
+  ///
+  bool ParseTimeSampleValue(const uint32_t type_id, value::Value *result);
+
+  ///
   /// Parse TimeSample value with specified `type_name`(Appears in USDA. .e.g. "float", "matrix2d")
   ///
   bool ParseTimeSampleValue(const std::string &type_name, value::Value *result);
+
+  ///
+  /// Parse TimeSample value with specified base type of `type_id`(value::TypeId)
+  /// (You can obrain type_id from string using value::GetTypeId())
+  ///
+  bool ParseTimeSampleValueOfArrayType(const uint32_t base_type_id, value::Value *result);
 
   ///
   /// Parse TimeSample value with specified array type of `type_name`("[]" omiotted. .e.g. "float" for "float[]")
@@ -668,7 +680,7 @@ class AsciiParser {
 
   bool Eof() { return _sr->eof(); }
 
-  bool ParseRelation(Relation *result);
+  bool ParseRelationship(Relationship *result);
   bool ParseProperty(std::map<std::string, Property> *props);
 
   //
@@ -757,7 +769,7 @@ class AsciiParser {
 
   template <typename T>
   bool ParseBasicPrimAttr(bool array_qual, const std::string &primattr_name,
-                          PrimAttrib *out_attr);
+                          Attribute *out_attr);
 
   bool ParseStageMeta(std::pair<ListEditQual, MetaVariable> *out);
 

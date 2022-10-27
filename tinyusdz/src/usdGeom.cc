@@ -24,25 +24,22 @@ constexpr auto kPrimvarsNormals = "primvars:normals";
 }  // namespace
 
 const std::vector<value::point3f> GeomMesh::GetPoints(
-    double time, TimeSampleInterpolationType interp) const {
+    double time, value::TimeSampleInterpolationType interp) const {
   std::vector<value::point3f> dst;
 
-  if (!points.authored() || points.IsBlocked()) {
+  if (!points.authored() || points.is_blocked()) {
     return dst;
   }
 
-  if (points.IsConnection()) {
+  if (points.is_connection()) {
     // TODO: connection
     return dst;
   }
 
-  if (auto pv = points.GetValue()) {
-    if (pv.value().IsTimeSamples()) {
-      if (auto tsv = pv.value().ts.TryGet(time, interp)) {
-        dst = tsv.value();
-      }
-    } else if (pv.value().IsScalar()) {
-      dst = pv.value().value;
+  if (auto pv = points.get_value()) {
+    std::vector<value::point3f> val;
+    if (pv.value().get(time, &val, interp)) {
+      dst = std::move(val);
     }
   }
 
@@ -50,44 +47,41 @@ const std::vector<value::point3f> GeomMesh::GetPoints(
 }
 
 const std::vector<value::normal3f> GeomMesh::GetNormals(
-    double time, TimeSampleInterpolationType interp) const {
+    double time, value::TimeSampleInterpolationType interp) const {
   std::vector<value::normal3f> dst;
 
   if (props.count(kPrimvarsNormals)) {
     const auto prop = props.at(kPrimvarsNormals);
-    if (prop.IsRel()) {
+    if (prop.is_relationship()) {
       // TODO:
       return dst;
     }
 
-    if (prop.GetAttrib().get_var().is_timesample()) {
+    if (prop.get_attribute().get_var().is_timesamples()) {
       // TODO:
       return dst;
     }
 
-    if (prop.GetAttrib().type_name() == "normal3f[]") {
+    if (prop.get_attribute().type_name() == "normal3f[]") {
       if (auto pv =
-              prop.GetAttrib().get_value<std::vector<value::normal3f>>()) {
+              prop.get_attribute().get_value<std::vector<value::normal3f>>()) {
         dst = pv.value();
       }
     }
   } else if (normals.authored()) {
-    if (normals.IsConnection()) {
+    if (normals.is_connection()) {
       // TODO
       return dst;
-    } else if (normals.IsBlocked()) {
+    } else if (normals.is_blocked()) {
       return dst;
     }
 
-    if (normals.GetValue()) {
-      if (normals.GetValue().value().IsTimeSamples()) {
-        // TODO
-        (void)time;
-        (void)interp;
-        return dst;
-      }
+    if (normals.get_value()) {
 
-      dst = normals.GetValue().value().value;
+      std::vector<value::normal3f> val;
+      if (normals.get_value().value().get(time, &val, interp)) {
+        dst = std::move(val);
+      }
     }
   }
 
@@ -97,13 +91,13 @@ const std::vector<value::normal3f> GeomMesh::GetNormals(
 Interpolation GeomMesh::GetNormalsInterpolation() const {
   if (props.count(kPrimvarsNormals)) {
     const auto &prop = props.at(kPrimvarsNormals);
-    if (prop.GetAttrib().type_name() == "normal3f[]") {
-      if (prop.GetAttrib().meta.interpolation) {
-        return prop.GetAttrib().meta.interpolation.value();
+    if (prop.get_attribute().type_name() == "normal3f[]") {
+      if (prop.get_attribute().metas().interpolation) {
+        return prop.get_attribute().metas().interpolation.value();
       }
     }
-  } else if (normals.meta.interpolation) {
-    return normals.meta.interpolation.value();
+  } else if (normals.metas().interpolation) {
+    return normals.metas().interpolation.value();
   }
 
   return Interpolation::Vertex;  // default 'vertex'
@@ -112,17 +106,21 @@ Interpolation GeomMesh::GetNormalsInterpolation() const {
 const std::vector<int32_t> GeomMesh::GetFaceVertexCounts() const {
   std::vector<int32_t> dst;
 
-  if (!faceVertexCounts.authored() || faceVertexCounts.IsBlocked()) {
+  if (!faceVertexCounts.authored() || faceVertexCounts.is_blocked()) {
     return dst;
   }
 
-  if (faceVertexCounts.IsConnection()) {
+  if (faceVertexCounts.is_connection()) {
     // TODO: connection
     return dst;
   }
 
-  if (auto pv = faceVertexCounts.GetValue()) {
-    dst = pv.value().value;
+  if (auto pv = faceVertexCounts.get_value()) {
+    std::vector<int32_t> val;
+    // TOOD: timesamples
+    if (pv.value().get_scalar(&val)) {
+      dst = std::move(val);
+    }
   }
   return dst;
 }
@@ -130,17 +128,21 @@ const std::vector<int32_t> GeomMesh::GetFaceVertexCounts() const {
 const std::vector<int32_t> GeomMesh::GetFaceVertexIndices() const {
   std::vector<int32_t> dst;
 
-  if (!faceVertexIndices.authored() || faceVertexIndices.IsBlocked()) {
+  if (!faceVertexIndices.authored() || faceVertexIndices.is_blocked()) {
     return dst;
   }
 
-  if (faceVertexIndices.IsConnection()) {
+  if (faceVertexIndices.is_connection()) {
     // TODO: connection
     return dst;
   }
 
-  if (auto pv = faceVertexIndices.GetValue()) {
-    dst = pv.value().value;
+  if (auto pv = faceVertexIndices.get_value()) {
+    std::vector<int32_t> val;
+    // TOOD: timesamples
+    if (pv.value().get_scalar(&val)) {
+      dst = std::move(val);
+    }
   }
   return dst;
 }
@@ -161,7 +163,7 @@ void GeomMesh::Initialize(const GPrim &gprim) {
       continue;
     }
 
-    const PrimAttrib &attr = prop.GetAttrib();
+    const PrimAttrib &attr = prop.get_attribute();
 
     if (attr_name == "points") {
       //if (auto p = primvar::as_vector<value::float3>(&attr.var)) {
@@ -249,10 +251,19 @@ nonstd::expected<bool, std::string> GeomMesh::ValidateGeomSubset() {
     return nonstd::make_unexpected("TODO: Support faceVertexCounts.connect\n");
   }
 
-  if (faceVertexCounts.GetValue()) {
-    const auto fvp = faceVertexCounts.GetValue();
-    const auto &fv = fvp.value().value;
-    size_t n = fv.size();
+  if (faceVertexCounts.get_value()) {
+    const auto fvp = faceVertexCounts.get_value();
+    std::vector<int32_t> fvc;
+
+    if (fvp.value().is_timesamples()) {
+      return nonstd::make_unexpected("TODO: faceVertexCounts.timeSamples\n");
+    }
+
+    if (!fvp.value().get_scalar(&fvc)) {
+      return nonstd::make_unexpected("Failed to get faceVertexCounts data.");
+    }
+
+    size_t n = fvc.size();
 
     // Currently we only check if face ids are valid.
     for (size_t i = 0; i < geom_subset_children.size(); i++) {

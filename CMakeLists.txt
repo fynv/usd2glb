@@ -5,7 +5,7 @@ add_subdirectory(tinyusdz)
 
 set (SOURCES
 main.cpp
-image.h
+Image.h
 )
 
 

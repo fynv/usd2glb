@@ -118,6 +118,7 @@ namespace {
 
 struct PrimNode {
   value::Value prim;
+  std::string elementName;
 
   int64_t parent{-1};            // -1 = root node
   std::vector<size_t> children;  // index to USDAReader._prims[]
@@ -483,18 +484,18 @@ class USDAReader::Impl {
             const prim::PropertyMap &properties,
             const ascii::AsciiParser::PrimMetaMap &in_meta)
             -> nonstd::expected<bool, std::string> {
-          if (!prim_name.IsValid()) {
+          if (!prim_name.is_valid()) {
             return nonstd::make_unexpected("Invalid Prim name: " +
                                            prim_name.full_path_name());
           }
-          if (prim_name.IsAbsolutePath() || prim_name.IsRootPath()) {
+          if (prim_name.is_absolute_path() || prim_name.is_root_path()) {
             return nonstd::make_unexpected(
                 "Prim name should not starts with '/' or contain `/`: Prim "
                 "name = " +
                 prim_name.full_path_name());
           }
 
-          if (!prim_name.GetPropPart().empty()) {
+          if (!prim_name.prop_part().empty()) {
             return nonstd::make_unexpected(
                 "Prim path should not contain property part(`.`): Prim name "
                 "= " +
@@ -535,7 +536,7 @@ class USDAReader::Impl {
           }
 
           prim.spec = spec;
-          prim.name = prim_name.GetPrimPart();
+          prim.name = prim_name.prim_part();
 
           // Add to scene graph.
           // NOTE: Scene graph is constructed from bottom up manner(Children
@@ -578,40 +579,40 @@ class USDAReader::Impl {
         [&](const ascii::AsciiParser::StageMetas &metas) {
           DCOUT("StageMeta CB:");
 
-          _stage.GetMetas().doc = metas.doc;
+          _stage.metas().doc = metas.doc;
           if (metas.upAxis) {
-            _stage.GetMetas().upAxis = metas.upAxis.value();
+            _stage.metas().upAxis = metas.upAxis.value();
           }
 
           if (metas.subLayers.size()) {
-            _stage.GetMetas().subLayers = metas.subLayers;
+            _stage.metas().subLayers = metas.subLayers;
           }
 
-          _stage.GetMetas().defaultPrim = metas.defaultPrim;
+          _stage.metas().defaultPrim = metas.defaultPrim;
           if (metas.metersPerUnit) {
-            _stage.GetMetas().metersPerUnit = metas.metersPerUnit.value();
+            _stage.metas().metersPerUnit = metas.metersPerUnit.value();
           }
 
           if (metas.timeCodesPerSecond) {
-            _stage.GetMetas().timeCodesPerSecond =
+            _stage.metas().timeCodesPerSecond =
                 metas.timeCodesPerSecond.value();
           }
 
           if (metas.startTimeCode) {
-            _stage.GetMetas().startTimeCode = metas.startTimeCode.value();
+            _stage.metas().startTimeCode = metas.startTimeCode.value();
           }
 
           if (metas.endTimeCode) {
-            _stage.GetMetas().endTimeCode = metas.endTimeCode.value();
+            _stage.metas().endTimeCode = metas.endTimeCode.value();
           }
 
           if (metas.framesPerSecond) {
-            _stage.GetMetas().framesPerSecond = metas.framesPerSecond.value();
+            _stage.metas().framesPerSecond = metas.framesPerSecond.value();
           }
 
-          _stage.GetMetas().customLayerData = metas.customLayerData;
+          _stage.metas().customLayerData = metas.customLayerData;
 
-          _stage.GetMetas().stringData = metas.strings;
+          _stage.metas().stringData = metas.strings;
 
           return true;  // ok
         });
@@ -882,7 +883,7 @@ class USDAReader::Impl {
         }
       } else if (meta.first == "references") {
 
-        if (var.IsBlocked()) {
+        if (var.is_blocked()) {
           // create references with empty array.
           out->references = std::make_pair(listEditQual, std::vector<Reference>());
         } else if (auto pv = var.Get<Reference>()) {
@@ -900,7 +901,7 @@ class USDAReader::Impl {
         }
       } else if (meta.first == "payload") {
 
-        if (var.IsBlocked()) {
+        if (var.is_blocked()) {
           // create payload with empty array.
           out->payload = std::make_pair(listEditQual, std::vector<Payload>());
         } else if (auto pv = var.Get<Reference>()) {
@@ -1079,14 +1080,15 @@ void ReconstructNodeRec(const size_t idx,
 
 
 bool USDAReader::Impl::ReconstructStage() {
-  _stage.GetRootPrims().clear();
+  _stage.root_prims().clear();
 
   for (const auto &idx : _toplevel_prims) {
     DCOUT("Toplevel prim idx: " << std::to_string(idx));
 
     const auto &node = _prim_nodes[idx];
 
-    Prim prim(node.prim);
+    // root's elementPath is empty(which is interpreted as "/").
+    Prim prim("", node.prim);
     DCOUT("prim[" << idx << "].type = " << node.prim.type_name());
 
     for (const auto &cidx : node.children) {
@@ -1100,16 +1102,12 @@ bool USDAReader::Impl::ReconstructStage() {
 #endif
     }
 
-    // root's elementPath is empty"/"
-    prim.element_path() = Path("", "");
-
     DCOUT("root prim[" << idx << "].elementPath = " << dump_path(prim.element_path()));
     DCOUT("root prim[" << idx << "].num_children = " << prim.children().size());
 
-    size_t sz = _stage.GetRootPrims().size();
-    _stage.GetRootPrims().emplace_back(std::move(prim));
+    _stage.root_prims().emplace_back(std::move(prim));
 
-    DCOUT("num_children = " << _stage.GetRootPrims()[sz].children().size());
+    DCOUT("num_children = " << _stage.root_prims()[size_t(_stage.root_prims().size() - 1)].children().size());
   }
 
   return true;
@@ -1152,10 +1150,10 @@ bool USDAReader::Impl::RegisterReconstructCallback<GPrim>() {
 
         // Update props;
         for (auto item : properties) {
-          if (item.second.IsRel()) {
+          if (item.second.is_relationship()) {
             PUSH_WARN("TODO: rel");
           } else {
-            gprim.props[item.first].attrib = item.second.GetAttrib();
+            gprim.props[item.first].attrib = item.second.get_attribute();
           }
         }
 
@@ -1184,8 +1182,8 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
           //const prim::ReferenceList &references,
           const ascii::AsciiParser::PrimMetaMap &in_meta)
           -> nonstd::expected<bool, std::string> {
-        const Path &parent = full_path.GetParentPrimPath();
-        if (!parent.IsValid()) {
+        const Path &parent = full_path.get_parent_prim_path();
+        if (!parent.is_valid()) {
           return nonstd::make_unexpected("Invalid Prim path.");
         }
 
@@ -1213,7 +1211,7 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
 
     // TODO: Construct GeomMesh first
 #if 0
-        const std::string parent_primpath = parent.GetPrimPart();
+        const std::string parent_primpath = parent.prim_part();
 
         const PrimNode &pnode = _prim_nodes[size_t(parentPrimIdx)];
         auto pmesh = pnode.prim.get_value<GeomMesh>();
@@ -1238,12 +1236,12 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
         // Update props;
         for (auto item : properties) {
           if (item.first == "elementType") {
-            if (item.second.IsRel()) {
+            if (item.second.is_relationship()) {
               PUSH_ERROR_AND_RETURN(
                   "`elementType` property as Relation is not supported.");
             }
-            if (auto pv = item.second.GetAttrib().var.get_value<value::token>()) {
-              if (item.second.GetAttrib().uniform) {
+            if (auto pv = item.second.get_attribute().var.get_value<value::token>()) {
+              if (item.second.get_attribute().uniform) {
                 auto e = subset.SetElementType(pv.value().str());
                 if (!e) {
                   PUSH_ERROR_AND_RETURN(e.error());
@@ -1254,13 +1252,13 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
             PUSH_ERROR_AND_RETURN(
                 "`elementType` property must be `uniform token` type.");
           } else if (item.first == "familyType") {
-            if (item.second.IsRel()) {
+            if (item.second.is_relationship()) {
               PUSH_ERROR_AND_RETURN(
                   "`familyType` property as Relation is not supported.");
             }
 
-            if (auto pv = item.second.GetAttrib().var.get_value<value::token>()) {
-              if (item.second.GetAttrib().uniform) {
+            if (auto pv = item.second.get_attribute().var.get_value<value::token>()) {
+              if (item.second.get_attribute().uniform) {
                 auto e = subset.SetFamilyType(pv.value().str());
                 if (!e) {
                   PUSH_ERROR_AND_RETURN(e.error());
@@ -1272,13 +1270,13 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
                 "`familyType` property must be `uniform token` type.");
 
           } else if (item.first == "indices") {
-            if (item.second.IsRel()) {
+            if (item.second.is_relationship()) {
               PUSH_ERROR_AND_RETURN(
                   "`indices` property as Relation is not supported.");
             }
 
             if (auto pv =
-                    item.second.GetAttrib().var.get_value<std::vector<int>>()) {
+                    item.second.get_attribute().var.get_value<std::vector<int>>()) {
               // int -> uint
               std::transform(pv.value().begin(), pv.value().end(),
                              std::back_inserter(subset.indices),
@@ -1287,10 +1285,10 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
 
             PUSH_ERROR_AND_RETURN(
                 "`indices` property must be `int[]` type, but got `" +
-                item.second.GetAttrib().var.type_name() + "`");
+                item.second.get_attribute().var.type_name() + "`");
 
           } else if (item.first == "material:binding") {
-            if (!item.second.IsRel()) {
+            if (!item.second.is_relationship()) {
               PUSH_ERROR_AND_RETURN(
                   "`material:binding` property as Attribute is not "
                   "supported.");
@@ -1309,12 +1307,12 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
 
         for (auto item : properties) {
           if (item.first == "elementType") {
-            if (item.second.IsRel()) {
+            if (item.second.is_relationship()) {
               PUSH_ERROR_AND_RETURN(
                   "`elementType` property as Relation is not supported.");
             }
-            if (auto pv = item.second.GetAttrib().get_value<value::token>()) {
-              if (item.second.GetAttrib().variability == Variability::Uniform) {
+            if (auto pv = item.second.get_attribute().get_value<value::token>()) {
+              if (item.second.get_attribute().variability() == Variability::Uniform) {
                 auto e = subset.SetElementType(pv.value().str());
                 if (!e) {
                   PUSH_ERROR_AND_RETURN(e.error());
@@ -1325,13 +1323,13 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
             PUSH_ERROR_AND_RETURN(
                 "`elementType` property must be `uniform token` type.");
           } else if (item.first == "familyType") {
-            if (item.second.IsRel()) {
+            if (item.second.is_relationship()) {
               PUSH_ERROR_AND_RETURN(
                   "`familyType` property as Relation is not supported.");
             }
 
-            if (auto pv = item.second.GetAttrib().get_value<value::token>()) {
-              if (item.second.GetAttrib().variability == Variability::Uniform) {
+            if (auto pv = item.second.get_attribute().get_value<value::token>()) {
+              if (item.second.get_attribute().variability() == Variability::Uniform) {
                 auto e = subset.SetFamilyType(pv.value().str());
                 if (!e) {
                   PUSH_ERROR_AND_RETURN(e.error());
@@ -1343,13 +1341,13 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
                 "`familyType` property must be `uniform token` type.");
 
           } else if (item.first == "indices") {
-            if (item.second.IsRel()) {
+            if (item.second.is_relationship()) {
               PUSH_ERROR_AND_RETURN(
                   "`indices` property as Relation is not supported.");
             }
 
             if (auto pv =
-                    item.second.GetAttrib().get_value<std::vector<int>>()) {
+                    item.second.get_attribute().get_value<std::vector<int>>()) {
               // int -> uint
               std::transform(pv.value().begin(), pv.value().end(),
                              std::back_inserter(subset.indices),
@@ -1357,34 +1355,34 @@ bool USDAReader::Impl::RegisterReconstructCallback<GeomSubset>() {
             } else {
               PUSH_ERROR_AND_RETURN(
                   "`indices` property must be `int[]` type, but got `" +
-                  item.second.GetAttrib().type_name() + "`");
+                  item.second.get_attribute().type_name() + "`");
             }
 
           } else if (item.first == "material:binding") {
-            if (!item.second.IsRel()) {
+            if (!item.second.is_relationship()) {
               PUSH_ERROR_AND_RETURN(
                   "`material:binding` property as Attribute is not "
                   "supported.");
             }
           } else if (item.first == "familyName") {
-            if (item.second.IsRel()) {
+            if (item.second.is_relationship()) {
               PUSH_ERROR_AND_RETURN(
                   "`familyName` property as Relation is not supported.");
             }
 
-            if (auto pv = item.second.GetAttrib().get_value<value::token>()) {
+            if (auto pv = item.second.get_attribute().get_value<value::token>()) {
               subset.familyName = pv.value();
             } else {
               PUSH_ERROR_AND_RETURN(
                   "`familyName` property must be `token` type, but got `" +
-                  item.second.GetAttrib().type_name() + "`");
+                  item.second.get_attribute().type_name() + "`");
             }
           } else {
             PUSH_WARN("GeomSubset: TODO: " + item.first);
           }
         }
 
-        subset.name = prim_name.GetPrimPart();
+        subset.name = prim_name.prim_part();
         subset.spec = spec;
         subset.meta = meta;
 

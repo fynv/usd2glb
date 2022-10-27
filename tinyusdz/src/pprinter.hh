@@ -133,6 +133,8 @@ std::string to_string(const GeomCube &geom, const uint32_t indent = 0, bool clos
 std::string to_string(const GeomCamera &camera, const uint32_t indent = 0, bool closing_brace = true);
 
 std::string to_string(const GeomSubset &subset, const uint32_t indent = 0, bool closing_brace = true);
+std::string to_string(const GeomSubset::ElementType ty);
+std::string to_string(const GeomSubset::FamilyType ty);
 
 std::string to_string(const GeomBasisCurves::Wrap &v);
 std::string to_string(const GeomBasisCurves::Type &v);
@@ -181,9 +183,14 @@ std::string print_variantSelectionMap(const VariantSelectionMap &map, const uint
 std::string print_payload(const prim::PayloadList &payload, const uint32_t indent);
 std::string print_timesamples(const value::TimeSamples &v, const uint32_t indent);
 std::string print_rel_prop(const Property &prop, const std::string &name, uint32_t indent);
+std::string print_prop(const Property &prop, const std::string &prop_name, uint32_t indent);
 std::string print_props(const std::map<std::string, Property> &props, uint32_t indent);
 
+// Forwad decl
+class Stage;
 
+// Stage::ExportToString() in pxrUSD
+std::string to_string(const Stage &stage);
 
 } // namespace tinyusdz
 

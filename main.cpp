@@ -71,10 +71,10 @@ int main(int argc, char* argv[])
 
 	//tinyusdz::usda::SaveAsUSDA("output.udsa", stage, &warn, &err);
 
-	double time_codes_per_sec = stage.GetMetas().timeCodesPerSecond.GetValue();
+	double time_codes_per_sec = stage.metas().timeCodesPerSecond.get_value();
 
 
-	tinyusdz::Prim* root_prim = &stage.GetRootPrims()[0];
+	tinyusdz::Prim* root_prim = &stage.root_prims()[0];
 
 	tinygltf::Model m_out;
 	m_out.scenes.resize(1);
@@ -118,119 +118,133 @@ int main(int argc, char* argv[])
 
 			auto* material_in = prim.prim->data().as<tinyusdz::Material>();
 			material_mid.name = material_in->name;
-			std::string outputs_surface = material_in->surface->target.value().GetPrimPart();			
+			std::string outputs_surface = material_in->surface->target.value().prim_part();			
 			const tinyusdz::Prim* pshader0 = stage.GetPrimAtPath(tinyusdz::Path(outputs_surface, "")).value();			
 			auto* shader0 = pshader0->data().as<tinyusdz::Shader>();
 			auto* surface = shader0->value.as<tinyusdz::UsdPreviewSurface>();
 			{
 				auto diffuse = surface->diffuseColor;
-				auto diffuse_connection = diffuse.GetConnection();
+				auto diffuse_connection = diffuse.get_connection();
 				if (diffuse_connection.has_value())
 				{
-					std::string path = diffuse_connection.value().GetPrimPart();
+					std::string path = diffuse_connection.value().prim_part();
 					const tinyusdz::Prim* pshader1 = stage.GetPrimAtPath(tinyusdz::Path(path, "")).value();
 					auto* shader1 = pshader1->data().as<tinyusdz::Shader>();
 					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
-					auto file = tex->file.GetValue().value().value;
+					tinyusdz::value::AssetPath file;
+					tex->file.get_value().value().get_scalar(&file);					
 					material_mid.diffuse_tex = file.GetAssetPath();					
 
-					auto uv_connection = tex->st.GetConnection();
+					auto uv_connection = tex->st.get_connection();
 					if (uv_connection.has_value())
 					{
-						std::string path_uv = uv_connection.value().GetPrimPart();
+						std::string path_uv = uv_connection.value().prim_part();
 						const tinyusdz::Prim* pshader2 = stage.GetPrimAtPath(tinyusdz::Path(path_uv, "")).value();
 						auto* shader2 = pshader2->data().as<tinyusdz::Shader>();
 						auto* uvset = shader2->value.as<tinyusdz::UsdPrimvarReader_float2>();
-						material_mid.uvset = uvset->varname.GetValue().value().value.str();					
+						tinyusdz::value::token token_uv;
+						uvset->varname.get_value().value().get_scalar(&token_uv);
+						material_mid.uvset = token_uv.str();
 					}
 
 				}
 				else
 				{
-					auto col = diffuse.GetValue().value;
+					tinyusdz::value::color3f col;
+					diffuse.get_value().get_scalar(&col);
 					material_mid.diffuse_color = { col[0], col[1], col[2] };
 				}
 			}
 			{
 				auto emissive = surface->emissiveColor;
-				auto emissive_connection = emissive.GetConnection();
+				auto emissive_connection = emissive.get_connection();
 				if (emissive_connection.has_value())
 				{
-					std::string path = emissive_connection.value().GetPrimPart();
+					std::string path = emissive_connection.value().prim_part();
 					const tinyusdz::Prim* pshader1 = stage.GetPrimAtPath(tinyusdz::Path(path, "")).value();
 					auto* shader1 = pshader1->data().as<tinyusdz::Shader>();
 					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
-					auto file = tex->file.GetValue().value().value;
+					tinyusdz::value::AssetPath file;
+					tex->file.get_value().value().get_scalar(&file);
 					material_mid.emissive_tex = file.GetAssetPath();
 
-					auto uv_connection = tex->st.GetConnection();
+					auto uv_connection = tex->st.get_connection();
 					if (uv_connection.has_value())
 					{
-						std::string path_uv = uv_connection.value().GetPrimPart();
+						std::string path_uv = uv_connection.value().prim_part();
 						const tinyusdz::Prim* pshader2 = stage.GetPrimAtPath(tinyusdz::Path(path_uv, "")).value();
 						auto* shader2 = pshader2->data().as<tinyusdz::Shader>();
 						auto* uvset = shader2->value.as<tinyusdz::UsdPrimvarReader_float2>();
-						material_mid.uvset = uvset->varname.GetValue().value().value.str();
+						tinyusdz::value::token token_uv;
+						uvset->varname.get_value().value().get_scalar(&token_uv);
+						material_mid.uvset = token_uv.str();
 					}
 				}
 				else
 				{
-					auto col = emissive.GetValue().value;
+					tinyusdz::value::color3f col;
+					emissive.get_value().get_scalar(&col);
 					material_mid.emissive_color = { col[0], col[1], col[2] };
 				}
 			}
 			{
 				auto metallic = surface->metallic;
-				auto metallic_connection = metallic.GetConnection();
+				auto metallic_connection = metallic.get_connection();
 				if (metallic_connection.has_value())
 				{
-					std::string path = metallic_connection.value().GetPrimPart();
+					std::string path = metallic_connection.value().prim_part();
 					const tinyusdz::Prim* pshader1 = stage.GetPrimAtPath(tinyusdz::Path(path, "")).value();
 					auto* shader1 = pshader1->data().as<tinyusdz::Shader>();
 					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
-					auto file = tex->file.GetValue().value().value;
+					tinyusdz::value::AssetPath file;
+					tex->file.get_value().value().get_scalar(&file);
 					material_mid.metallic_tex = file.GetAssetPath();
 
-					auto uv_connection = tex->st.GetConnection();
+					auto uv_connection = tex->st.get_connection();
 					if (uv_connection.has_value())
 					{
-						std::string path_uv = uv_connection.value().GetPrimPart();
+						std::string path_uv = uv_connection.value().prim_part();
 						const tinyusdz::Prim* pshader2 = stage.GetPrimAtPath(tinyusdz::Path(path_uv, "")).value();
 						auto* shader2 = pshader2->data().as<tinyusdz::Shader>();
 						auto* uvset = shader2->value.as<tinyusdz::UsdPrimvarReader_float2>();
-						material_mid.uvset = uvset->varname.GetValue().value().value.str();
+						tinyusdz::value::token token_uv;
+						uvset->varname.get_value().value().get_scalar(&token_uv);
+						material_mid.uvset = token_uv.str();
 					}
 				}
 				else
 				{
-					material_mid.metallic = metallic.GetValue().value;
+					metallic.get_value().get_scalar(&material_mid.metallic);
 				}
 			}
 			{
 				auto roughness = surface->roughness;
-				auto roughness_connection = roughness.GetConnection();
+				auto roughness_connection = roughness.get_connection();
 				if (roughness_connection.has_value())
 				{
-					std::string path = roughness_connection.value().GetPrimPart();
+					std::string path = roughness_connection.value().prim_part();
 					const tinyusdz::Prim* pshader1 = stage.GetPrimAtPath(tinyusdz::Path(path, "")).value();
 					auto* shader1 = pshader1->data().as<tinyusdz::Shader>();
 					auto* tex = shader1->value.as<tinyusdz::UsdUVTexture>();
-					auto file = tex->file.GetValue().value().value;
+					tinyusdz::value::AssetPath file;
+					tex->file.get_value().value().get_scalar(&file);
 					material_mid.roughness_tex = file.GetAssetPath();
 
-					auto uv_connection = tex->st.GetConnection();
+					auto uv_connection = tex->st.get_connection();
 					if (uv_connection.has_value())
 					{
-						std::string path_uv = uv_connection.value().GetPrimPart();
+						std::string path_uv = uv_connection.value().prim_part();
 						const tinyusdz::Prim* pshader2 = stage.GetPrimAtPath(tinyusdz::Path(path_uv, "")).value();
 						auto* shader2 = pshader2->data().as<tinyusdz::Shader>();
 						auto* uvset = shader2->value.as<tinyusdz::UsdPrimvarReader_float2>();
-						material_mid.uvset = uvset->varname.GetValue().value().value.str();
+						tinyusdz::value::token token_uv;
+						uvset->varname.get_value().value().get_scalar(&token_uv);
+						material_mid.uvset = token_uv.str();
 					}
 				}
 				else
 				{
-					material_mid.roughness = roughness.GetValue().value;
+					roughness.get_value().get_scalar(&material_mid.roughness);
 				}
 
 			}
@@ -336,19 +350,22 @@ int main(int argc, char* argv[])
 				auto iter = mesh_in->props.find("primvars:displayColor");
 				if (iter != mesh_in->props.end())
 				{
-					auto col = iter->second.GetAttrib().get_value<std::vector<tinyusdz::value::float3>>().value()[0];
+					auto col = iter->second.get_attribute().get_value<std::vector<tinyusdz::value::float3>>().value()[0];
 					material_mid.diffuse_color = { col[0], col[1], col[2] };
 				}
 				material_lst.push_back(material_mid);
 			}
 
 			Mid::Material& material_mid = material_lst[idx_material];
-			material_mid.double_sided = mesh_in->doubleSided.GetValue();
+			material_mid.double_sided = mesh_in->doubleSided.get_value();
 
 			prim_out.material = idx_material;
 
-			auto points = mesh_in->points.GetValue().value().value;
-			auto extent = mesh_in->extent.GetValue().value().value;
+			std::vector<tinyusdz::value::point3f> points;
+			mesh_in->points.get_value().value().get_scalar(&points);
+
+			tinyusdz::Extent extent;
+			mesh_in->extent.get_value().value().get_scalar(&extent);
 
 			offset = buf_out.data.size();
 			length = points.size() * sizeof(glm::vec3);
@@ -380,9 +397,10 @@ int main(int argc, char* argv[])
 
 			prim_out.attributes["POSITION"] = acc_id;
 
-			if (mesh_in->normals.GetValue().has_value())
+			if (mesh_in->normals.get_value().has_value())
 			{
-				auto norms = mesh_in->normals.GetValue().value().value;
+				std::vector<tinyusdz::value::normal3f> norms;
+				mesh_in->normals.get_value().value().get_scalar(&norms);
 
 				offset = buf_out.data.size();
 				length = norms.size() * sizeof(glm::vec3);
@@ -413,8 +431,11 @@ int main(int argc, char* argv[])
 				prim_out.attributes["NORMAL"] = acc_id;
 			}
 
-			auto faceVertexIndices = mesh_in->faceVertexIndices.GetValue().value().value;
-			auto faceVertexCounts = mesh_in->faceVertexCounts.GetValue().value().value;
+			std::vector<int> faceVertexIndices;
+			mesh_in->faceVertexIndices.get_value().value().get_scalar(&faceVertexIndices);
+
+			std::vector<int> faceVertexCounts;
+			mesh_in->faceVertexCounts.get_value().value().get_scalar(&faceVertexCounts);
 
 			size_t idx_ind = 0;
 			std::vector<glm::ivec3> faces;
@@ -477,7 +498,7 @@ int main(int argc, char* argv[])
 			auto iter = mesh_in->props.find(var_name_uvset);
 			if (iter != mesh_in->props.end())
 			{
-				auto uv = iter->second.GetAttrib().get_value<std::vector<tinyusdz::value::float2>>().value();
+				auto uv = iter->second.get_attribute().get_value<std::vector<tinyusdz::value::float2>>().value();
 
 				offset = buf_out.data.size();
 				length = uv.size() * sizeof(glm::vec2);
@@ -521,10 +542,10 @@ int main(int argc, char* argv[])
 				std::string skel_path = mesh_in->skeleton.value().full_path_name();
 				node_skin_map[node_id] = skel_path;
 
-				auto ji = iter_ji->second.GetAttrib().get_value<std::vector<int>>().value();
-				auto jw = iter_jw->second.GetAttrib().get_value<std::vector<float>>().value();
+				auto ji = iter_ji->second.get_attribute().get_value<std::vector<int>>().value();
+				auto jw = iter_jw->second.get_attribute().get_value<std::vector<float>>().value();
 
-				unsigned elem_size = iter_ji->second.GetAttrib().meta.elementSize.value();
+				unsigned elem_size = iter_ji->second.get_attribute().metas().elementSize.value();
 				size_t count = ji.size() / elem_size;
 
 				std::vector<glm::u8vec4> conv_ji(count, { 0,0,0,0 });
@@ -614,9 +635,9 @@ int main(int argc, char* argv[])
 			skin_map[path] = skin_idx;
 
 			auto* skel_in = prim.prim->data().as<tinyusdz::Skeleton>();
-			auto bindTrans = skel_in->bindTransforms.GetValue().value();
-			auto joints = skel_in->joints.GetValue().value();
-			auto restTrans = skel_in->restTransforms.GetValue().value();
+			auto bindTrans = skel_in->bindTransforms.get_value().value();
+			auto joints = skel_in->joints.get_value().value();
+			auto restTrans = skel_in->restTransforms.get_value().value();
 
 			std::vector<glm::mat4> inv_binding_matrices(bindTrans.size());
 
@@ -719,7 +740,7 @@ int main(int argc, char* argv[])
 		auto& material = material_lst[i];
 		if (material.diffuse_tex != "")
 		{
-			auto& iter = tex_map.find(material.diffuse_tex);
+			auto iter = tex_map.find(material.diffuse_tex);
 			if (iter == tex_map.end())
 			{
 				int idx = (int)tex_lst.size();
@@ -739,7 +760,7 @@ int main(int argc, char* argv[])
 		}
 		if (material.emissive_tex != "")
 		{
-			auto& iter = tex_map.find(material.emissive_tex);
+			auto iter = tex_map.find(material.emissive_tex);
 			if (iter == tex_map.end())
 			{
 				int idx = (int)tex_lst.size();
@@ -885,12 +906,12 @@ int main(int argc, char* argv[])
 			tinygltf::Animation& anim_out = m_out.animations[id_anim];
 			anim_out.name = anim_in->name;
 
-			bool has_translations = anim_in->translations.GetValue().has_value();
-			bool has_rotations = anim_in->rotations.GetValue().has_value();
-			bool has_scales = anim_in->scales.GetValue().has_value();
+			bool has_translations = anim_in->translations.get_value().has_value();
+			bool has_rotations = anim_in->rotations.get_value().has_value();
+			bool has_scales = anim_in->scales.get_value().has_value();
 			
 
-			auto joints = anim_in->joints.GetValue().value();
+			auto joints = anim_in->joints.get_value().value();
 			for (size_t i = 0; i < joints.size(); i++)
 			{
 				std::string joint_path = joints[i].str();
@@ -900,7 +921,7 @@ int main(int argc, char* argv[])
 
 				if (has_translations)
 				{
-					auto translations = anim_in->translations.GetValue().value().ts.GetSamples();
+					auto translations = anim_in->translations.get_value().value().get_timesamples().get_samples();
 
 					int id_channel = (int)anim_out.channels.size();
 					anim_out.channels.resize(id_channel + 1);
@@ -987,7 +1008,7 @@ int main(int argc, char* argv[])
 
 				if (has_rotations)
 				{
-					auto rotations = anim_in->rotations.GetValue().value().ts.GetSamples();							
+					auto rotations = anim_in->rotations.get_value().value().get_timesamples().get_samples();
 
 					int id_channel = (int)anim_out.channels.size();
 					anim_out.channels.resize(id_channel + 1);

@@ -143,9 +143,7 @@ class Node {
 // TODO: Move to prim-types.cc
 //
 
-namespace {
-
-nonstd::optional<Path> GetPrimElementName(const value::Value &v) {
+nonstd::optional<std::string> GetPrimElementName(const value::Value &v) {
   // Since multiple get_value() call consumes lots of stack size(depends on
   // sizeof(T)?), Following code would produce 100KB of stack in debug build. So
   // use as() instead(as() => roughly 2000 bytes for stack size).
@@ -218,9 +216,7 @@ nonstd::optional<Path> GetPrimElementName(const value::Value &v) {
 
 #define EXTRACT_NAME_AND_RETURN_PATH(__ty) \
   if (v.as<__ty>()) {                      \
-    Path p(v.as<__ty>()->name, "");   \
-    p.element_name() = v.as<__ty>()->name; \
-    return std::move(p); \
+    return v.as<__ty>()->name;             \
   }
 
   EXTRACT_NAME_AND_RETURN_PATH(Model)
@@ -246,9 +242,16 @@ nonstd::optional<Path> GetPrimElementName(const value::Value &v) {
   EXTRACT_NAME_AND_RETURN_PATH(Shader)
   EXTRACT_NAME_AND_RETURN_PATH(UsdPreviewSurface)
   EXTRACT_NAME_AND_RETURN_PATH(UsdUVTexture)
+  EXTRACT_NAME_AND_RETURN_PATH(UsdPrimvarReader_int)
+  EXTRACT_NAME_AND_RETURN_PATH(UsdPrimvarReader_float)
+  EXTRACT_NAME_AND_RETURN_PATH(UsdPrimvarReader_float2)
+  EXTRACT_NAME_AND_RETURN_PATH(UsdPrimvarReader_float3)
+  EXTRACT_NAME_AND_RETURN_PATH(UsdPrimvarReader_float4)
+  EXTRACT_NAME_AND_RETURN_PATH(SkelRoot)
+  EXTRACT_NAME_AND_RETURN_PATH(Skeleton)
+  EXTRACT_NAME_AND_RETURN_PATH(SkelAnimation)
+  EXTRACT_NAME_AND_RETURN_PATH(BlendShape)
 
-  // TODO: primvar reader
-  // EXTRACT_NAME_AND_RETURN_PATH(UsdPrimvarReader_float);
 
 #undef EXTRACT_NAME_AND_RETURN_PATH
 
@@ -257,14 +260,63 @@ nonstd::optional<Path> GetPrimElementName(const value::Value &v) {
   return nonstd::nullopt;
 }
 
-}  // namespace
+bool SetPrimElementName(value::Value &v, const std::string &elementName) {
+
+  // Lookup name field of Prim class
+  bool ok{false};
+
+#define SET_ELEMENT_NAME(__name, __ty) \
+  if (v.as<__ty>()) {                      \
+    v.as<__ty>()->name = __name;             \
+    ok = true; \
+  }
+
+  SET_ELEMENT_NAME(elementName, Model)
+  SET_ELEMENT_NAME(elementName, Scope)
+  SET_ELEMENT_NAME(elementName, Xform)
+  SET_ELEMENT_NAME(elementName, GPrim)
+  SET_ELEMENT_NAME(elementName, GeomMesh)
+  SET_ELEMENT_NAME(elementName, GeomPoints)
+  SET_ELEMENT_NAME(elementName, GeomCube)
+  SET_ELEMENT_NAME(elementName, GeomCapsule)
+  SET_ELEMENT_NAME(elementName, GeomCylinder)
+  SET_ELEMENT_NAME(elementName, GeomSphere)
+  SET_ELEMENT_NAME(elementName, GeomCone)
+  SET_ELEMENT_NAME(elementName, GeomSubset)
+  SET_ELEMENT_NAME(elementName, GeomCamera)
+  SET_ELEMENT_NAME(elementName, GeomBasisCurves)
+  SET_ELEMENT_NAME(elementName, DomeLight)
+  SET_ELEMENT_NAME(elementName, SphereLight)
+  SET_ELEMENT_NAME(elementName, CylinderLight)
+  SET_ELEMENT_NAME(elementName, DiskLight)
+  SET_ELEMENT_NAME(elementName, RectLight)
+  SET_ELEMENT_NAME(elementName, Material)
+  SET_ELEMENT_NAME(elementName, Shader)
+  SET_ELEMENT_NAME(elementName, UsdPreviewSurface)
+  SET_ELEMENT_NAME(elementName, UsdUVTexture)
+  SET_ELEMENT_NAME(elementName, UsdPrimvarReader_int)
+  SET_ELEMENT_NAME(elementName, UsdPrimvarReader_float)
+  SET_ELEMENT_NAME(elementName, UsdPrimvarReader_float2)
+  SET_ELEMENT_NAME(elementName, UsdPrimvarReader_float3)
+  SET_ELEMENT_NAME(elementName, UsdPrimvarReader_float4)
+  SET_ELEMENT_NAME(elementName, SkelRoot)
+  SET_ELEMENT_NAME(elementName, Skeleton)
+  SET_ELEMENT_NAME(elementName, SkelAnimation)
+  SET_ELEMENT_NAME(elementName, BlendShape)
+
+
+#undef SET_ELEMENT_NAME
+
+  return ok;
+}
 
 Prim::Prim(const value::Value &rhs) {
   // Check if type is Prim(Model(GPrim), usdShade, usdLux, etc.)
   if ((value::TypeId::TYPE_ID_MODEL_BEGIN <= rhs.type_id()) &&
       (value::TypeId::TYPE_ID_MODEL_END > rhs.type_id())) {
     if (auto pv = GetPrimElementName(rhs)) {
-      _path = pv.value();
+      _path = Path(pv.value(), /* prop part*/ "");
+      _elementPath = Path(pv.value(), /* prop part */ "");
     }
 
     _data = rhs;
@@ -280,9 +332,39 @@ Prim::Prim(value::Value &&rhs) {
     _data = std::move(rhs);
 
     if (auto pv = GetPrimElementName(_data)) {
-      _path = pv.value();
+      _path = Path(pv.value(), "");
+      _elementPath = Path(pv.value(), "");
     }
 
+  } else {
+    // TODO: Raise an error if rhs is not an Prim
+  }
+}
+
+Prim::Prim(const std::string &elementPath, const value::Value &rhs) {
+  // Check if type is Prim(Model(GPrim), usdShade, usdLux, etc.)
+  if ((value::TypeId::TYPE_ID_MODEL_BEGIN <= rhs.type_id()) &&
+      (value::TypeId::TYPE_ID_MODEL_END > rhs.type_id())) {
+    _path = Path(elementPath, /* prop part*/ "");
+    _elementPath = Path(elementPath, /* prop part */ "");
+
+    _data = rhs;
+    SetPrimElementName(_data, elementPath);
+  } else {
+    // TODO: Raise an error if rhs is not an Prim
+  }
+}
+
+Prim::Prim(const std::string &elementPath, value::Value &&rhs) {
+  // Check if type is Prim(Model(GPrim), usdShade, usdLux, etc.)
+  if ((value::TypeId::TYPE_ID_MODEL_BEGIN <= rhs.type_id()) &&
+      (value::TypeId::TYPE_ID_MODEL_END > rhs.type_id())) {
+
+    _path = Path(elementPath, /* prop part */"");
+    _elementPath = Path(elementPath, /* prop part */"");
+
+    _data = std::move(rhs);
+    SetPrimElementName(_data, elementPath);
   } else {
     // TODO: Raise an error if rhs is not an Prim
   }
@@ -292,29 +374,32 @@ namespace {
 
 nonstd::optional<const Prim *> GetPrimAtPathRec(const Prim *parent,
                                                 const std::string &parent_path,
-                                                const Path &path, const uint32_t depth) {
+                                                const Path &path,
+                                                const uint32_t depth) {
   std::string abs_path;
   // if (auto pv = GetPrimElementName(parent->data())) {
   {
-    // TODO: Use elementPath
-    std::string elementName = parent->local_path().GetPrimPart();
+    std::string elementName = parent->element_path().prim_part();
     DCOUT(pprint::Indent(depth) << "Prim elementName = " << elementName);
     DCOUT(pprint::Indent(depth) << "Given Path = " << path);
     // fully absolute path
     abs_path = parent_path + "/" + elementName;
     DCOUT(pprint::Indent(depth) << "abs_path = " << abs_path);
-    DCOUT(pprint::Indent(depth) << "queriying path = " << path.full_path_name());
+    DCOUT(pprint::Indent(depth)
+          << "queriying path = " << path.full_path_name());
     if (abs_path == path.full_path_name()) {
-      DCOUT(pprint::Indent(depth) << "Got it! Found Prim at Path = " << abs_path);
+      DCOUT(pprint::Indent(depth)
+            << "Got it! Found Prim at Path = " << abs_path);
       return parent;
     }
   }
 
-  DCOUT(pprint::Indent(depth) << "# of children : " << parent->children().size());
+  DCOUT(pprint::Indent(depth)
+        << "# of children : " << parent->children().size());
   for (const auto &child : parent->children()) {
-    //const std::string &p = parent->elementPath.full_path_name();
-    DCOUT(pprint::Indent(depth+1) << "Parent path : " << abs_path);
-    if (auto pv = GetPrimAtPathRec(&child, abs_path, path, depth+1)) {
+    // const std::string &p = parent->elementPath.full_path_name();
+    DCOUT(pprint::Indent(depth + 1) << "Parent path : " << abs_path);
+    if (auto pv = GetPrimAtPathRec(&child, abs_path, path, depth + 1)) {
       return pv.value();
     }
   }
@@ -326,7 +411,8 @@ nonstd::optional<const Prim *> GetPrimAtPathRec(const Prim *parent,
 
 nonstd::expected<const Prim *, std::string> Stage::GetPrimAtPath(
     const Path &path) const {
-  DCOUT("GerPrimAtPath : " << path);
+  DCOUT("GerPrimAtPath : " << path.prim_part() << "(input path: " << path
+                           << ")");
 
   if (_dirty) {
     // Clear cache.
@@ -335,32 +421,33 @@ nonstd::expected<const Prim *, std::string> Stage::GetPrimAtPath(
     _dirty = false;
   } else {
     // First find from a cache.
-    auto ret = _prim_path_cache.find(path.GetPrimPart());
+    auto ret = _prim_path_cache.find(path.prim_part());
     if (ret != _prim_path_cache.end()) {
       return ret->second;
     }
   }
 
-  if (!path.IsValid()) {
+  if (!path.is_valid()) {
     return nonstd::make_unexpected("Path is invalid.\n");
   }
 
-  if (path.IsRelativePath()) {
+  if (path.is_relative_path()) {
     // TODO:
     return nonstd::make_unexpected("Relative path is TODO.\n");
   }
 
-  if (!path.IsAbsolutePath()) {
+  if (!path.is_absolute_path()) {
     return nonstd::make_unexpected(
         "Path is not absolute. Non-absolute Path is TODO.\n");
   }
 
   // Brute-force search.
   for (const auto &parent : root_nodes) {
-    if (auto pv = GetPrimAtPathRec(&parent, /* root */"", path, /* depth */0)) {
+    if (auto pv =
+            GetPrimAtPathRec(&parent, /* root */ "", path, /* depth */ 0)) {
       // Add to cache.
       // Assume pointer address does not change unless dirty state.
-      _prim_path_cache[path.GetPrimPart()] = pv.value();
+      _prim_path_cache[path.prim_part()] = pv.value();
       return pv.value();
     }
   }
@@ -369,28 +456,42 @@ nonstd::expected<const Prim *, std::string> Stage::GetPrimAtPath(
                                  "> int the Stage.\n");
 }
 
+bool Stage::find_prim_at_path(const Path &path, const Prim *&prim,
+                              std::string *err) const {
+  nonstd::expected<const Prim *, std::string> ret = GetPrimAtPath(path);
+  if (ret) {
+    prim = ret.value();
+    return true;
+  } else {
+    if (err) {
+      (*err) = ret.error();
+    }
+    return false;
+  }
+}
+
 nonstd::expected<const Prim *, std::string> Stage::GetPrimFromRelativePath(
     const Prim &root, const Path &path) const {
   // TODO: Resolve "../"
   // TODO: cache path
 
-  if (!path.IsValid()) {
+  if (!path.is_valid()) {
     return nonstd::make_unexpected("Path is invalid.\n");
   }
 
-  if (path.IsAbsolutePath()) {
+  if (path.is_absolute_path()) {
     return nonstd::make_unexpected(
         "Path is absolute. Path must be relative.\n");
   }
 
-  if (path.IsRelativePath()) {
+  if (path.is_relative_path()) {
     // ok
   } else {
     return nonstd::make_unexpected("Invalid Path.\n");
   }
 
-#if 0 // TODO
-  Path abs_path = root.local_path();
+#if 0  // TODO
+  Path abs_path = root.element_path();
   abs_path.AppendElement(path.GetPrimPart());
 
   DCOUT("root path = " << root.path());
@@ -410,10 +511,29 @@ nonstd::expected<const Prim *, std::string> Stage::GetPrimFromRelativePath(
 #endif
 }
 
+bool Stage::find_prim_from_relative_path(const Prim &root,
+                                         const Path &relative_path,
+                                         const Prim *&prim,
+                                         std::string *err) const {
+  nonstd::expected<const Prim *, std::string> ret =
+      GetPrimFromRelativePath(root, relative_path);
+  if (ret) {
+    prim = ret.value();
+    return true;
+  } else {
+    if (err) {
+      (*err) = ret.error();
+    }
+    return false;
+  }
+}
+
 namespace {
 
 void PrimPrintRec(std::stringstream &ss, const Prim &prim, uint32_t indent) {
   ss << "\n";
+  // Currently, Prim's elementName is read from name variable in concrete Prim class(e.g. Xform::name).
+  // TODO: use prim.elementPath for elementName.
   ss << pprint_value(prim.data(), indent, /* closing_brace */ false);
 
   DCOUT("num_children = " << prim.children().size());
@@ -440,25 +560,25 @@ std::string Stage::ExportToString() const {
   }
 
   if (stage_metas.metersPerUnit.authored()) {
-    ss << "  metersPerUnit = " << stage_metas.metersPerUnit.GetValue() << "\n";
+    ss << "  metersPerUnit = " << stage_metas.metersPerUnit.get_value() << "\n";
   }
 
   if (stage_metas.upAxis.authored()) {
-    ss << "  upAxis = " << quote(to_string(stage_metas.upAxis.GetValue()))
+    ss << "  upAxis = " << quote(to_string(stage_metas.upAxis.get_value()))
        << "\n";
   }
 
   if (stage_metas.timeCodesPerSecond.authored()) {
-    ss << "  timeCodesPerSecond = " << stage_metas.timeCodesPerSecond.GetValue()
-       << "\n";
+    ss << "  timeCodesPerSecond = "
+       << stage_metas.timeCodesPerSecond.get_value() << "\n";
   }
 
   if (stage_metas.startTimeCode.authored()) {
-    ss << "  startTimeCode = " << stage_metas.startTimeCode.GetValue() << "\n";
+    ss << "  startTimeCode = " << stage_metas.startTimeCode.get_value() << "\n";
   }
 
   if (stage_metas.endTimeCode.authored()) {
-    ss << "  endTimeCode = " << stage_metas.endTimeCode.GetValue() << "\n";
+    ss << "  endTimeCode = " << stage_metas.endTimeCode.get_value() << "\n";
   }
 
   // TODO: Do not print subLayers when consumed(after composition evaluated)
@@ -471,7 +591,7 @@ std::string Stage::ExportToString() const {
        << "\n";
   }
   if (!stage_metas.comment.value.empty()) {
-    ss << "  doc = " << to_string(stage_metas.comment) << "\n";
+    ss << "  comment = " << to_string(stage_metas.comment) << "\n";
   }
 
   if (stage_metas.customLayerData.size()) {
