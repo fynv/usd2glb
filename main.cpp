@@ -103,7 +103,7 @@ int main(int argc, char* argv[])
 	
 	tinyusdz::Prim* root_prim = &stage.root_prims()[0];
 	
-	tinygltf::Model m_out;
+	tinygltf::Model m_out;	
 	m_out.scenes.resize(1);
 	tinygltf::Scene& scene_out = m_out.scenes[0];
 	scene_out.name = "Scene";
@@ -133,6 +133,8 @@ int main(int argc, char* argv[])
 
 	std::queue<Prim> queue_prim;
 
+	bool specular_used = false;
+
 	queue_prim.push({ root_prim, -1, "" });
 	while (!queue_prim.empty())
 	{
@@ -153,7 +155,9 @@ int main(int argc, char* argv[])
 
 			int useSpecularWorkflow;
 			surface->useSpecularWorkflow.get_value().get_scalar(&useSpecularWorkflow);			
-			material_mid.useSpecularWorkflow = useSpecularWorkflow != 0;					
+			material_mid.useSpecularWorkflow = useSpecularWorkflow != 0;		
+
+			specular_used = specular_used || material_mid.useSpecularWorkflow;
 
 			{
 				auto diffuse = surface->diffuseColor;
@@ -379,6 +383,11 @@ int main(int argc, char* argv[])
 				queue_prim.push({ &prim.prim->children()[i], -1, path });
 			}
 		}
+	}
+
+	if (specular_used)
+	{
+		m_out.extensionsUsed.push_back("KHR_materials_pbrSpecularGlossiness");
 	}
 
 	std::unordered_map<std::string, int> joint_map;
