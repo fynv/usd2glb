@@ -392,8 +392,6 @@ int main(int argc, char* argv[])
 		queue_prim.pop();
 		std::string path = prim.base_path + "/" + prim.prim->element_path().full_path_name();
 
-		int id_node_base = prim.id_node_base;
-
 		if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_GEOM_XFORM)
 		{
 			auto* node_in = prim.prim->data().as<tinyusdz::Xform>();			
@@ -407,7 +405,6 @@ int main(int argc, char* argv[])
 			}
 
 			int node_id = (int)m_out.nodes.size();
-			id_node_base = node_id;
 
 			tinygltf::Node node_out;
 			node_out.name = node_in->name;
@@ -439,12 +436,12 @@ int main(int argc, char* argv[])
 				node_out.rotation = { rotation.x, rotation.y, rotation.z, rotation.w };
 				scene_out.nodes.push_back(node_id);
 			}
+			prim.id_node_base = node_id;
 		}
 		else if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_SKEL_ROOT)
 		{
 			auto* node_in = prim.prim->data().as<tinyusdz::SkelRoot>();
 			int node_id = (int)m_out.nodes.size();
-			id_node_base = node_id;
 
 			{
 				auto iter = node_in->props.find("skel:skeleton");
@@ -481,6 +478,8 @@ int main(int argc, char* argv[])
 
 					m_out.nodes.push_back(node_out);
 					scene_out.nodes.push_back(node_id);
+
+					prim.id_node_base = node_id;
 					break;
 				}
 			}
@@ -504,13 +503,12 @@ int main(int argc, char* argv[])
 			}
 
 			int node_id = (int)m_out.nodes.size();
-			int mesh_id = (int)m_out.meshes.size();
-			id_node_base = node_id;
+			int mesh_id = (int)m_out.meshes.size();			
 
 			tinygltf::Node node_out;
 			node_out.name = mesh_in->name;
 			node_out.mesh = mesh_id;
-			m_out.nodes.push_back(node_out);
+			m_out.nodes.push_back(node_out);			
 
 			if (prim.id_node_base >= 0)
 			{
@@ -521,6 +519,7 @@ int main(int argc, char* argv[])
 				node_out.rotation = { axis_rot.x, axis_rot.y, axis_rot.z, axis_rot.w };
 				scene_out.nodes.push_back(node_id);
 			}
+			prim.id_node_base = node_id;
 
 			tinygltf::Mesh mesh_out;
 			mesh_out.name = node_out.name;
@@ -1319,7 +1318,7 @@ int main(int argc, char* argv[])
 			size_t num_children = prim.prim->children().size();
 			for (size_t i = 0; i < num_children; i++)
 			{
-				queue_prim.push({ &prim.prim->children()[i],id_node_base, path, prim.idx_material, prim.skel_path });
+				queue_prim.push({ &prim.prim->children()[i], prim.id_node_base, path, prim.idx_material, prim.skel_path });
 			}
 		}
 	}
