@@ -207,6 +207,97 @@ inline bool tokenize_variantElement(const std::string &elementName, std::array<s
 
 }
 
+// Escape backslash('\') to '\\'
+inline std::string escapeBackslash(const std::string &str) {
+  std::string s = str;
+
+  std::string bs = "\\";
+  std::string bs_escaped = "\\\\";
+
+  std::string::size_type pos = 0;
+  while ((pos = s.find(bs, pos)) != std::string::npos) {
+    s.replace(pos, bs.length(), bs_escaped);
+    pos += bs_escaped.length();
+  }
+
+  return s;
+}
+
+// Unescape backslash('\\' -> '\')
+inline std::string unescapeBackslash(const std::string &str) {
+  std::string s = str;
+
+  std::string bs = "\\\\";
+  std::string bs_unescaped = "\\";
+
+  std::string::size_type pos = 0;
+  while ((pos = s.find(bs, pos)) != std::string::npos) {
+    s.replace(pos, bs.length(), bs_unescaped);
+    pos += bs_unescaped.length();
+  }
+
+  return s;
+}
+
+// TfIsValidIdentifier in pxrUSD equivalanet
+inline bool isValidIdentifier(const std::string &str) {
+
+  if (str.empty()) {
+    return false;
+  }
+
+  // first char
+  // [a-ZA-Z_]
+  if ((('a' <= str[0]) && (str[0] <= 'z')) || (('A' <= str[0]) && (str[0] <= 'Z')) || (str[0] == '_')) {
+    // ok
+  } else {
+    return false;
+  }
+
+  // remain chars
+  // [a-ZA-Z0-9_]
+  for (size_t i = 1; i < str.length(); i++) {
+    if ((('a' <= str[i]) && (str[i] <= 'z')) || (('A' <= str[i]) && (str[i] <= 'Z')) || (('0' <= str[i]) && (str[i] <= '9')) || (str[i] == '_')) {
+      // ok
+    } else {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+
+// TfMakeValidIdentifier in pxrUSD equivalanet
+inline std::string makeIdentifierValid(const std::string &str) {
+  std::string s;
+
+  if (str.empty()) {
+    // return '_'
+    return "_";
+  }
+
+  // first char
+  // [a-ZA-Z_]
+  if ((('a' <= str[0]) && (str[0] <= 'z')) || (('A' <= str[0]) && (str[0] <= 'Z')) || (str[0] == '_')) {
+    s.push_back(str[0]);
+  } else {
+    s.push_back('_');
+  }
+
+  // remain chars
+  // [a-ZA-Z0-9_]
+  for (size_t i = 1; i < str.length(); i++) {
+    if ((('a' <= str[i]) && (str[i] <= 'z')) || (('A' <= str[i]) && (str[i] <= 'Z')) || (('0' <= str[i]) && (str[i] <= '9')) || (str[i] == '_')) {
+      s.push_back(str[i]);
+    } else {
+      s.push_back('_');
+    }
+  }
+  
+  return s;
+}
+
 #if 0
 template<typename It>
 inline std::string quote_then_join(const std::string& sep, const It& v, const std::string &quote = "\"")

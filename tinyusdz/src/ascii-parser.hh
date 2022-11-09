@@ -112,8 +112,11 @@ class AsciiParser {
     nonstd::optional<double> endTimeCode;
     nonstd::optional<double> framesPerSecond;
 
+    nonstd::optional<bool> autoPlay;
+    nonstd::optional<value::token> playbackMode;  // 'none' or 'loop'
+
     std::map<std::string, MetaVariable> customLayerData;  // `customLayerData`.
-    std::vector<StringData> strings;  // String only unregistered metadata.
+    StringData comment;  // String only comment string.
   };
 
   struct ParseState {
@@ -650,9 +653,9 @@ class AsciiParser {
 
   // skip_semicolon true: ';' can be used as a separator. this flag is for
   // statement block.
-  bool SkipWhitespaceAndNewline(bool allow_semicolon = true);
+  bool SkipWhitespaceAndNewline(const bool allow_semicolon = true);
+  bool SkipCommentAndWhitespaceAndNewline(const bool allow_semicolon = true);
 
-  bool SkipCommentAndWhitespaceAndNewline();
   bool SkipUntilNewline();
 
   // bool ParseAttributeMeta();

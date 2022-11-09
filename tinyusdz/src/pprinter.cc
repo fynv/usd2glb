@@ -107,7 +107,7 @@ std::ostream &operator<<(std::ostream &ofs, const tinyusdz::StringData &v) {
   }
 
   ofs << delim;
-  ofs << v.value;
+  ofs << tinyusdz::escapeBackslash(v.value);
   ofs << delim;
 
   return ofs;
@@ -343,6 +343,10 @@ std::string print_prim_metas(const PrimMeta &meta, const uint32_t indent) {
 
   if (meta.kind) {
     ss << pprint::Indent(indent) << "kind = " << quote(to_string(meta.kind.value())) << "\n";
+  }
+
+  if (meta.sceneName) {
+    ss << pprint::Indent(indent) << "sceneName = " << quote(meta.sceneName.value()) << "\n";
   }
 
   if (meta.assetInfo) {
@@ -1124,17 +1128,21 @@ std::string to_string(const APISchemas::APIName &name) {
   return s;
 }
 
+std::string to_string(const CustomDataType &custom) {
+  return print_customData(custom, "", 0);
+}
+
 std::string to_string(const StringData &s) {
-  if (s.is_triple_quoted) {
-    return quote(s.value, "\"\"\"");
-  } else {
-    return quote(s.value);
-  }
+  std::stringstream ss;
+  ss << s;
+  return ss.str();
 }
 
 std::string to_string(const std::string &v) {
   // TODO: Escape `"` character.
-  return quote(v);
+
+  // Escape backslash
+  return quote(escapeBackslash(v));
 }
 
 std::string to_string(const Reference &v) {
@@ -1194,15 +1202,15 @@ std::string print_meta(const MetaVariable &meta, const uint32_t indent) {
 
   //ss << "TODO: isObject " << meta.is_object() << ", isValue " << meta.IsValue() << "\n";
 
-  if (auto pv = meta.Get<CustomDataType>()) {
+  if (auto pv = meta.get_value<CustomDataType>()) {
     // dict
-    ss << pprint::Indent(indent) << "dictionary " << meta.name << " = {\n";
+    ss << pprint::Indent(indent) << "dictionary " << meta.get_name() << " = {\n";
     for (const auto &item : pv.value()) {
       ss << print_meta(item.second, indent+1);
     }
     ss << pprint::Indent(indent) << "}\n";
   } else {
-    ss << pprint::Indent(indent) << meta.type << " " << meta.name << " = " << pprint_value(meta.get_raw()) << "\n";
+    ss << pprint::Indent(indent) << meta.type_name() << " " << meta.get_name() << " = " << pprint_value(meta.get_raw_value()) << "\n";
   }
 
   return ss.str();

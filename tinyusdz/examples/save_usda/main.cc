@@ -1,3 +1,4 @@
+// TODO: merge into api-tutorial example.
 #include "usda-writer.hh"
 
 #include <iostream>
@@ -23,7 +24,7 @@ void SimpleScene(tinyusdz::Stage *stage)
   translate[0] = 1.0;
   translate[1] = 2.0;
   translate[2] = 3.0;
-  op.set_scalar(translate);
+  op.set_value(translate);
 
   xform.xformOps.push_back(op);
 
@@ -83,7 +84,7 @@ void SimpleScene(tinyusdz::Stage *stage)
 
       // or we can first build primvar::PrimVar
       //tinyusdz::primvar::PrimVar uvVar;
-      //uvVar.set_scalar(uvs);
+      //uvVar.set_value(uvs);
       //uvAttr.set_var(std::move(uvVar));
 
       // Currently `interpolation` is described in Attribute metadataum.
@@ -108,7 +109,7 @@ void SimpleScene(tinyusdz::Stage *stage)
 
 
       tinyusdz::primvar::PrimVar uvIndexVar;
-      uvIndexVar.set_scalar(uvIndices);
+      uvIndexVar.set_value(uvIndices);
       uvIndexAttr.set_var(std::move(uvIndexVar));
 
       tinyusdz::Property uvIndexProp(uvIndexAttr, /* custom*/false);
@@ -121,7 +122,7 @@ void SimpleScene(tinyusdz::Stage *stage)
       tinyusdz::Attribute attrib;
       double myvalue = 3.0;
       tinyusdz::primvar::PrimVar var;
-      var.set_scalar(myvalue);
+      var.set_value(myvalue);
       attrib.set_var(std::move(var));
 
       attrib.variability() = tinyusdz::Variability::Uniform;

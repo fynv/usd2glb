@@ -1,18 +1,22 @@
 # Tiny USDZ library in C++14
 
-`TinyUSDZ` is dependency-free(depends only on C++ STL. Other 3rd-party libraries included. Yes, you don't need pxrUSD library!) USDZ/USDC/USDA library written in C++14.
+`TinyUSDZ` is secure, portable and dependency-free(depends only on C++ STL. Other 3rd-party libraries included. Yes, you don't need pxrUSD library!) USDZ/USDC/USDA library written in C++14.
 
 ## Build status
 
 [![C/C++ CI](https://github.com/syoyo/tinyusdz/workflows/C/C++%20CI/badge.svg)](https://github.com/syoyo/tinyusdz/actions/)
 
+|         |   Linux                                  |  Windows                              |   macOS   |  iOS   | Android |
+|:-------:|:---------------------------------------- |:------------------------------------- |:---------:|:------:|:-------:|
+| dev     | [![Linux Build](https://github.com/syoyo/tinyusdz/actions/workflows/linux_ci.yml/badge.svg)](https://github.com/syoyo/tinyusdz/actions/workflows/linux_ci.yml) | [![Windows CI build](https://github.com/syoyo/tinyusdz/actions/workflows/windows_ci.yml/badge.svg)](https://github.com/syoyo/tinyusdz/actions/workflows/windows_ci.yml) </br> [![Windows ARM CI build](https://github.com/syoyo/tinyusdz/actions/workflows/windows_arm_ci.yml/badge.svg)](https://github.com/syoyo/tinyusdz/actions/workflows/windows_arm_ci.yml)  | [![macOS Build](https://github.com/syoyo/tinyusdz/actions/workflows/macos_ci.yml/badge.svg)](https://github.com/syoyo/tinyusdz/actions/workflows/macos_ci.yml) | [![iOS Build](https://github.com/syoyo/tinyusdz/actions/workflows/ios_ci.yml/badge.svg)](https://github.com/syoyo/tinyusdz/actions/workflows/ios_ci.yml) | [![Android arm64v8a Build](https://github.com/syoyo/tinyusdz/actions/workflows/android_ci.yml/badge.svg)](https://github.com/syoyo/tinyusdz/actions/workflows/android_ci.yml) |
+
 [![Total alerts](https://img.shields.io/lgtm/alerts/g/syoyo/tinyusdz.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/syoyo/tinyusdz/alerts/)
 
 ## Supported platforms
 
-|         |   Linux                                  |  Windows                              |   macOS   |  iOS   | Android |  WASM                          |
+|         |   Linux                                  |  Windows                              |   macOS   |  iOS   | Android |  WASM(WASI)                    |
 |:-------:|:---------------------------------------- |:------------------------------------- |:---------:|:------:|:-------:|:------------------------------:|
-|   dev   | ✅ 64bit </br> ✅ 32bit </br> ✅ aarch64 | ✅ 64bit </br> ✅ 32bit </br> 🤔 ARM  |✅         |✅      |✅       |✅ [sandbox/wasi](sandbox/wasi) |
+|   dev   | ✅ 64bit </br> ✅ 32bit </br> ✅ aarch64 | ✅ 64bit </br> ✅ 32bit </br> ✅ ARM64/ARM32  |✅         |✅      |✅       |✅ [sandbox/wasi](sandbox/wasi) |
 
 
 ## Status
@@ -21,7 +25,7 @@ TinyUSDZ is near to release first version v0.8.0.
 Core loading feature(both USDA and USDC) is production-grade.
 (Flattened scene only(i.e, USDZ). Composition features are not supported yet)
 
-Remaining task is to write a examples, demo and scene/render delegate(Tydra).
+Remaining task is to write examples, demos and utility functions(Tydra).
 
 * [x] USDZ/USDC(Crate) parser
 * [ ] USDZ/USDC(Crate) writer (Work-in-progress)
@@ -31,9 +35,9 @@ Remaining task is to write a examples, demo and scene/render delegate(Tydra).
 
 **Please see** [doc/status.md](doc/status.md) **for more details**
 
-* [ ] Write simple SDL viewer example(2022 Fall/Winter expected)
-* [ ] Write iOS and Android example(2022 Fall/Winter expected)
-* [ ] Vulkan raytracing viewer example
+* [ ] Write simple SDL viewer example(2022 Winter expected)
+* [ ] Write iOS and Android example(2022 Winter expected)
+* [ ] Vulkan or OptiX/HIP RT raytracing viewer example
 * [ ] USD <-> glTF converter example
   * There is an independent work of USD to glTF binary GLB converter: https://github.com/fynv/usd2glb
 * [ ] Web demo with Three.js?
@@ -43,7 +47,7 @@ Remaining task is to write a examples, demo and scene/render delegate(Tydra).
 
 TinyUSDZ has first priority of considering security and stability.
 
-USDZ(USDC) is a binary format and data are compressed. To avoid out-of-bounds access, out-of-memory, and other security issues when loading malcious USDZ(e.g. USDZ file from unknown origin), TinyUSDZ has a memory budget feature to avoid out-of-memory issue.
+USDZ(USDC) is a binary format. To avoid out-of-bounds access, out-of-memory, and other security issues when loading malcious USDZ(e.g. USDZ file from unknown origin), TinyUSDZ has a memory budget feature to avoid out-of-memory issue.
 
 To limit a memory usage when loading USDZ file, Please set a value `max_memory_limit_in_mb` in USDLoadOptions.
 
@@ -54,9 +58,9 @@ TinyUSDZ source codes(and some external third party codes) are also checked by A
 See [tests/fuzzer](tests/fuzzer) .
 For building fuzzer tests, you'll need Meson and Ninja.
 
-If you need to deal with arbitrary USD files from unknown origin(e.g. from internet, NFT storage. Whose may contain malcious data), it is recommended to use TinyUSDZ in sandboxed environment(RunC, FlatPak, WASI(WASM)). Run in WASI is recommended at the moment(please see next section).
-
 #### Web platform(WASM) and sandboxed environment(WASI)
+
+If you need to deal with arbitrary USD files from unknown origin(e.g. from internet, NFT storage. Whose may contain malcious data), it is recommended to use TinyUSDZ in sandboxed environment(RunC, FlatPak, WASI(WASM)). Run in WASI is recommended at the moment.
 
 TinyUSDZ does not use C++ exceptions and can be built without threads. TinyUSDZ supports WASM and WASI build. So TinyUSDZ should runs well on various Web platform(WebAssembly. No SharedArrayBuffer, Atomics and WebAssembly SIMD(which is not yet available on iOS Safari) required) and sandboxed environment(WASI. Users who need to read various USD file which possibly could contain malcious data from Internet, IPFS or blockchain storage). 
 
@@ -65,6 +69,7 @@ See [sandbox/wasi/](sandbox/wasi) for Building TinyUSDZ with WASI toolchain.
 ### Tydra
 
 USD itself is a generic container of 3D scene data.
+
 Tydra is an interface to Renderers/Viewers and other DCCs.
 Tydra may be something like Tiny version of pxrUSD Hydra, but its API is completely different. See [src/tydra/README.md](src/tydra/README.md) for the background.
 
@@ -110,7 +115,8 @@ If you need commercial support, eco-system development(e.g. plug-ins, DCC tools 
 * [x] iOS
 * [x] macOS(Arm, x86-64)
 * [x] Windows 10 64bit or later
-  * [ ] Windows ARM(should work)
+  * [x] Windows ARM
+  * [x] clang-cl + MSVC SDK cross compile
 * [x] WebAssembly
   * Emscripten
     * See [examples/sdlviewer/](examples/sdlviewer) example.
@@ -214,6 +220,57 @@ See [examples](examples) directory for more examples, but may not actively maint
 
 See [prim_format.md](doc/prim_format.md) and [preview_surface.md](doc/preview_surface.md)
 
+## Example
+
+### Minimum example to load USDA/USDC/USDZ file.
+
+```
+// TinyUSDZ is not a header-only library, so no TINYUSDZ_IMPLEMENTATIONS
+#include "tinyusdz.hh"
+
+// If you want to print TinyUSDZ classes/enums.
+// to_string() and operator<< against TinyUSDZ classes/enums are provided separately.
+#include <iostream>
+#include "pprinter.hh"
+#include "value-pprint.hh"
+
+int main(int argc, char **argv) {
+
+  std::string filename = "input.usd";
+  std::string warn;
+  std::string err;
+
+  if (argc > 1) {
+    filename = argv[1];
+  }
+
+  tinyusdz::Stage stage; // Scene
+
+  // Auto detect USDA/USDC/USDZ
+  bool ret = tinyusdz::LoadUSDFromFile(filename, &stage, &warn, &err);
+
+  if (warn.size()) {
+    std::cout << "WARN : " << warn << "\n";
+  }
+
+  if (!ret) {
+    if (!err.empty()) {
+      std::cerr << "ERR : " << warn << "\n";
+    }
+    return EXIT_FAILURE;
+  }
+
+  // Print Stage(Scene graph) 
+  std::cout << stage.ExportToString() << "\n";
+
+  return EXIT_SUCCESS;
+}
+```
+
+### With Tydra
+
+T.B.W.
+
 ## Blender add-on(will be removed)
 
 There was some experiements of TinyUSDZ add-on for Blender.
@@ -308,6 +365,14 @@ then build TinyUSDZ by linking with this local Python build.
 ```
 > ci-build-vs2022.bat
 ```
+
+#### Cross compile with clang-cl + MSVC SDK on linux and run it on WINE(No Windows required at all solution!)
+
+clang-cl(MSVC cl.exe) + MSVC SDK cross compile is also supported.
+
+Please take a look at [doc/wine_cl.md](doc/wine_cl.md)
+
+You can build pure Windows build of TinyUSDZ on Linux CI machine.
 
 ## License
 

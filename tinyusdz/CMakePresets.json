@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default_debug",
+      "displayName": "Default Debug Config",
+      "description": "Default Debug build using Ninja generator",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "ninja-multi",
+      "inherits": "default_debug",
+      "displayName": "Ninja Multi-Config",
+      "description": "Default build using Ninja Multi-Config generator",
+      "generator": "Ninja Multi-Config"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "default_debug",
+      "configurePreset": "default_debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "default_debug",
+      "configurePreset": "default_debug",
+      "output": {"outputOnFailure": true},
+      "execution": {"noTestsAction": "error", "stopOnFailure": true}
+    }
+  ]
+}

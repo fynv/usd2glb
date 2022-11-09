@@ -1123,7 +1123,7 @@ bool USDCReader::Impl::ParseProperty(const SpecType spec_type,
       }
     }
     primvar::PrimVar var;
-    var.set_scalar(scalar);
+    var.set_value(scalar);
     attr.set_var(std::move(var));
   }
 
@@ -1415,6 +1415,66 @@ bool USDCReader::Impl::ReconstrcutStageMeta(
             fv.second.type_name() + "'");
       }
       DCOUT("endTimeCode = " << metas->endTimeCode.get_value());
+    } else if (fv.first == "framesPerSecond") {
+      if (auto vf = fv.second.get_value<float>()) {
+        metas->framesPerSecond = double(vf.value());
+      } else if (auto vd = fv.second.get_value<double>()) {
+        metas->framesPerSecond = vd.value();
+      } else {
+        PUSH_ERROR_AND_RETURN(
+            "`framesPerSecond` value must be double or float "
+            "type, but got '" +
+            fv.second.type_name() + "'");
+      }
+      DCOUT("framesPerSecond = " << metas->framesPerSecond.get_value());
+    } else if (fv.first == "autoPlay") {
+      if (auto vf = fv.second.get_value<bool>()) {
+        metas->autoPlay = vf.value();
+      } else if (auto vs = fv.second.get_value<std::string>()) {
+        // unregisteredvalue uses string type.
+        bool autoPlay{true};
+        if (vs.value() == "true") {
+          autoPlay = true;
+        } else if (vs.value() == "false") {
+          autoPlay = false;
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "Unsupported value for `autoPlay`: " << vs.value());
+        } 
+        metas->autoPlay = autoPlay;
+      } else {
+        PUSH_ERROR_AND_RETURN(
+            "`autoPlay` value must be bool "
+            "type or string type, but got '" +
+            fv.second.type_name() + "'");
+      }
+      DCOUT("autoPlay = " << metas->autoPlay.get_value());
+    } else if (fv.first == "playbackMode") {
+      if (auto vf = fv.second.get_value<value::token>()) {
+        if (vf.value().str() == "none") {
+          metas->playbackMode = StageMetas::PlaybackMode::PlaybackModeNone;
+        } else if (vf.value().str() == "loop") {
+          metas->playbackMode = StageMetas::PlaybackMode::PlaybackModeLoop;
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "Unsupported token value for `playbackMode`.");
+        }
+      } else if (auto vs = fv.second.get_value<std::string>()) {
+        // unregisteredvalue uses string type.
+        if (vs.value() == "none") {
+          metas->playbackMode = StageMetas::PlaybackMode::PlaybackModeNone;
+        } else if (vs.value() == "loop") {
+          metas->playbackMode = StageMetas::PlaybackMode::PlaybackModeLoop;
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "Unsupported value for `playbackMode`: " << vs.value());
+        }
+      } else {
+        PUSH_ERROR_AND_RETURN(
+            "`playbackMode` value must be token "
+            "type, but got '" +
+            fv.second.type_name() + "'");
+      }
     } else if ((fv.first == "defaultPrim")) {
       auto v = fv.second.get_value<value::token>();
       if (!v) {
@@ -2020,8 +2080,7 @@ bool USDCReader::Impl::ReconstructPrimNode(int parent, int current, int level,
           PUSH_WARN("TODO: `class` specifier. skipping this model...");
           return true;
         } else if (specifier.value() == Specifier::Over) {
-          PUSH_WARN("TODO: `over` specifier. skipping this model...");
-          return true;
+          // ok
         } else {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Invalid Specifier.");
         }
@@ -2158,8 +2217,7 @@ bool USDCReader::Impl::ReconstructPrimNode(int parent, int current, int level,
           PUSH_WARN("TODO: `class` specifier. skipping this model...");
           return true;
         } else if (specifier.value() == Specifier::Over) {
-          PUSH_WARN("TODO: `over` specifier. skipping this model...");
-          return true;
+          // ok
         } else {
           PUSH_ERROR_AND_RETURN_TAG(kTag, "Invalid Specifier.");
         }

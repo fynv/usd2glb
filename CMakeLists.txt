@@ -4,6 +4,7 @@ project(usd2glb)
 add_subdirectory(tinyusdz)
 
 set (SOURCES
+crc64/crc64.cpp
 main.cpp
 Image.h
 )
@@ -13,10 +14,12 @@ set (INCLUDE_DIR
 tinyusdz/src
 tinyusdz/src/external
 glm/glm
+crc64
 .
 )
 
 
+set(CMAKE_CXX_STANDARD 17)
 if (WIN32) 
 set (DEFINES  ${DEFINES}
 -D"_CRT_SECURE_NO_DEPRECATE"  
@@ -24,7 +27,6 @@ set (DEFINES  ${DEFINES}
 -D"_CRT_SECURE_NO_WARNINGS"
 )
 else()
-add_definitions(-std=c++17)
 add_compile_options(-fPIC)
 endif()
 

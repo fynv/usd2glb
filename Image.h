@@ -24,7 +24,36 @@ namespace Mid
 		void Set(int x, int y, const glm::u8vec4& v);
 
 		void Load(const char* fn);
+
+		void encode_png()
+		{
+			this->mimeType = "image/png";
+			stbi_write_png_to_func([](void* context, void* data, int size)
+				{
+					std::vector<unsigned char>* buf = (std::vector<unsigned char>*)context;
+					size_t offset = buf->size();
+					buf->resize(offset + size);
+					memcpy(buf->data() + offset, data, size);
+				}, &code, this->width, this->height, 4, pixels.data(), this->width * 4);
+
+		}
+
+		void encode_jpeg()
+		{
+			this->mimeType = "image/jpeg";
+
+			stbi_write_jpg_to_func([](void* context, void* data, int size)
+				{
+					std::vector<uint8_t>* buf = (std::vector<uint8_t>*)context;
+					size_t offset = buf->size();
+					buf->resize(offset + size);
+					memcpy(buf->data() + offset, data, size);
+				}, &code, this->width, this->height, 4, pixels.data(), 80);
+		}
+
+		void CreateRGBA(const Image& img_rgb, const Image& img_a);
 		void CreateMR(const Image& img_metallic, const Image& img_roughness);
+		void CreateSG(const Image& img_specular, const Image& img_roughness, float roughness);
 	};
 
 	glm::u8vec4 Image::Get(int x, int y) const
@@ -36,6 +65,8 @@ namespace Mid
 
 	glm::u8vec4 Image::Get(int x, int y, int width, int height) const
 	{
+		if (this->width < 0 || this->height < 0) return { 255,255,255,255 };
+
 		float fx = ((float)x + 0.5f) / (float)width;
 		float fy = ((float)y + 0.5f) / (float)height;
 		fx = fx * this->width - 0.5f;
@@ -102,6 +133,41 @@ namespace Mid
 		fclose(fp);
 	}
 
+	void Image::CreateRGBA(const Image& img_rgb, const Image& img_a)
+	{
+		if (img_rgb.width >= 0 && img_rgb.height >= 0)
+		{
+			this->width = img_rgb.width;
+			this->height = img_rgb.height;
+		}
+		else
+		{
+			this->width = img_a.width;
+			this->height = img_a.height;
+		}
+
+		this->pixels.resize(this->width * this->height * 4);
+
+		for (int i = 0; i < this->height; i++)
+		{
+			for (int j = 0; j < this->width; j++)
+			{				
+				glm::u8vec4 rgb = img_rgb.Get(j, i, this->width, this->height);
+				glm::u8vec4 a = img_a.Get(j, i, this->width, this->height);				
+				this->Set(j, i, { rgb[0], rgb[1], rgb[2], a[0]});
+			}
+		}
+
+		if (img_a.width >= 0 && img_a.height >= 0)
+		{
+			encode_png();
+		}
+		else
+		{
+			encode_jpeg();
+		}
+	}
+
 	void Image::CreateMR(const Image& img_metallic, const Image& img_roughness)
 	{
 		if (img_metallic.width > this->width)
@@ -136,15 +202,38 @@ namespace Mid
 			}
 		}
 
-		this->mimeType = "image/jpeg";
-		
-		stbi_write_jpg_to_func([](void* context, void* data, int size)
-		{
-			std::vector<uint8_t>* buf = (std::vector<uint8_t>*)context;
-			size_t offset = buf->size();
-			buf->resize(offset + size);
-			memcpy(buf->data() + offset, data, size);
-		}, &code, this->width, this->height, 4, pixels.data(), 80);
+		encode_jpeg();
 		
 	}
+
+	void Image::CreateSG(const Image& img_specular, const Image& img_roughness, float roughness)
+	{
+		if (img_specular.width >= 0 && img_specular.height >= 0)
+		{
+			this->width = img_specular.width;
+			this->height = img_specular.height;
+		}
+		else
+		{
+			this->width = img_roughness.width;
+			this->height = img_roughness.height;
+		}
+
+		this->pixels.resize(this->width * this->height * 4);
+
+		for (int i = 0; i < this->height; i++)
+		{
+			for (int j = 0; j < this->width; j++)
+			{
+				unsigned char glossiness = 255;
+				glm::u8vec4 s = img_specular.Get(j, i, this->width, this->height);
+				unsigned char r = (unsigned char)((float)img_roughness.Get(j, i, this->width, this->height)[0] * roughness + 0.5f);				
+				this->Set(j, i, { s[0], s[1], s[2], 255 -r });
+			}
+		}
+
+		encode_png();
+	}
+
+
 }
