@@ -375,7 +375,8 @@ int main(int argc, char* argv[])
 
 		}
 
-		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL)
+		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL
+			&& prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_GEOM_MESH)
 		{			
 			size_t num_children = prim.prim->children().size();
 			for (size_t i = 0; i < num_children; i++)
@@ -393,6 +394,14 @@ int main(int argc, char* argv[])
 	std::unordered_map<std::string, int> joint_map;
 	std::unordered_map<int, std::string> node_skin_map;
 	std::unordered_map<std::string, int> skin_map;
+
+	/*struct MorphIdx
+	{
+		int node_idx;
+		int morph_idx;
+	};
+
+	std::unordered_map<std::string, MorphIdx> morph_map;*/
 
 	queue_prim.push({ root_prim, -1, "" });
 	while (!queue_prim.empty())
@@ -539,6 +548,11 @@ int main(int argc, char* argv[])
 			std::vector<tinyusdz::value::point3f> points_in;
 			std::vector<tinyusdz::value::normal3f> norms_in;
 
+			std::vector<std::vector<tinyusdz::value::vector3f>> offsets_in;
+			std::vector<std::vector<tinyusdz::value::vector3f>> norm_offsets_in;
+			std::vector<bool> target_sparse;
+			std::vector<std::vector<bool>> non_zeros_in;
+
 			std::vector<glm::u8vec4> conv_ji_in;
 			std::vector<glm::vec4> conv_jw_in;
 
@@ -672,6 +686,73 @@ int main(int argc, char* argv[])
 
 			}
 
+			{
+				auto iter = mesh_in->props.find("skel:blendShapeTargets");
+				if (iter != mesh_in->props.end())
+				{					
+					auto paths = iter->second.get_relationship().targetPathVector;					
+					auto iter2 = mesh_in->props.find("skel:blendShapes");
+					auto names = iter2->second.get_attribute().get_value<std::vector<tinyusdz::Token>>().value();
+
+					size_t num_morphs = paths.size();
+					offsets_in.resize(num_morphs);
+					norm_offsets_in.resize(num_morphs);
+					target_sparse.resize(num_morphs, false);
+					non_zeros_in.resize(num_morphs);
+					for (size_t i = 0; i < num_morphs; i++)
+					{						
+						std::string name = names[i].str();
+						 // morph_map[name] = { node_id, (int)i };
+
+						const tinyusdz::Prim* primbs = stage.GetPrimAtPath(paths[i]).value();
+						auto* bs = primbs->data().as<tinyusdz::BlendShape>();
+
+						std::vector<tinyusdz::value::vector3f> offsets = bs->offsets.get_value().value();
+						offsets_in[i].resize(points_in.size());
+
+						std::vector<tinyusdz::value::vector3f> normOffsets;												
+						if (norms_in.size() > 0)
+						{
+							normOffsets = bs->normalOffsets.get_value().value();
+							norm_offsets_in[i].resize(norms_in.size());
+						}
+
+						non_zeros_in[i].resize(points_in.size(), false);
+						
+						if (bs->pointIndices.get_value().has_value())
+						{
+							target_sparse[i] = true;
+							auto pointIndices = bs->pointIndices.get_value().value();
+							size_t num_points = pointIndices.size();
+							for (size_t j = 0; j < num_points; j++)
+							{
+								int idx = pointIndices[j];
+								offsets_in[i][idx] = offsets[j];
+								if (normOffsets.size() > 0)
+								{
+									norm_offsets_in[i][idx] = normOffsets[j];
+								}
+								non_zeros_in[i][idx] = true;
+							}
+						}
+						else
+						{
+							target_sparse[i] = false;
+							for (size_t j = 0; j < points_in.size(); j++)
+							{
+								offsets_in[i][j] = offsets[j];
+								if (normOffsets.size() > 0)
+								{
+									norm_offsets_in[i][j] = normOffsets[j];
+								}
+								non_zeros_in[i][j] = true;
+							}
+						}
+					}
+
+				}
+			}
+
 			if (uv_indp_indices)
 			{
 				struct PointIn
@@ -682,11 +763,25 @@ int main(int argc, char* argv[])
 
 				std::vector<tinyusdz::value::point3f> points_out;
 				std::vector<tinyusdz::value::normal3f> norms_out;
+
+				std::vector<std::vector<tinyusdz::value::vector3f>> offsets_out;
+				std::vector<std::vector<tinyusdz::value::vector3f>> norm_offsets_out;
+				std::vector<std::vector<bool>> non_zeros_out;
+
 				std::vector<glm::u8vec4> conv_ji_out;
 				std::vector<glm::vec4> conv_jw_out;
 				std::vector<tinyusdz::value::float2> uv_out;
 				std::unordered_map<uint64_t, int> points_map;
 				std::vector<int> faceVertexIndices_out(faceVertexIndices.size());
+
+				size_t num_targets = offsets_in.size();
+				if (num_targets > 0)
+				{
+					offsets_out.resize(num_targets);
+					norm_offsets_out.resize(num_targets);
+					non_zeros_out.resize(num_targets);
+				}
+				
 
 				for (size_t i = 0; i < faceVertexIndices.size(); i++)
 				{
@@ -716,6 +811,21 @@ int main(int argc, char* argv[])
 						{
 							norms_out.push_back(norms_in[pnt.ind_pnt]);
 						}
+
+						if (num_targets > 0)
+						{							
+							for (size_t j = 0; j < num_targets; j++)
+							{								
+								offsets_out[j].push_back(offsets_in[j][pnt.ind_pnt]);							
+								if (norm_offsets_in[j].size() > 0)
+								{
+									norm_offsets_out[j].push_back(norm_offsets_in[j][pnt.ind_pnt]);
+								}								
+								non_zeros_out[j].push_back(non_zeros_in[j][pnt.ind_pnt]);								
+							}
+							
+						}
+
 						if (conv_ji_in.size() > 0)
 						{
 							conv_ji_out.push_back(conv_ji_in[pnt.ind_pnt]);
@@ -860,6 +970,238 @@ int main(int argc, char* argv[])
 				}
 
 				prim_out.indices = acc_id;
+
+				if (num_targets > 0)
+				{
+					prim_out.targets.resize(num_targets);
+					for (int lChannelIndex = 0; lChannelIndex < num_targets; ++lChannelIndex)
+					{
+						bool is_sparse = target_sparse[lChannelIndex];
+						auto& offsets = offsets_out[lChannelIndex];
+						auto& norm_offsets = norm_offsets_out[lChannelIndex];
+						auto& non_zeros = non_zeros_out[lChannelIndex];
+
+						size_t num_pos = points_out.size();
+
+						{
+							std::vector<int> indices;
+							std::vector<glm::vec3> delta_pos;
+							glm::vec3 min_pos = { 0.0f, 0.0f, 0.0f };
+							glm::vec3 max_pos = { 0.0f, 0.0f, 0.0f };
+
+							for (int k = 0; k < num_pos; k++)
+							{
+								if (non_zeros[k])
+								{
+									auto pos_offset = offsets[k];
+									if (pos_offset.x < min_pos.x) min_pos.x = pos_offset.x;
+									if (pos_offset.x > max_pos.x) max_pos.x = pos_offset.x;
+									if (pos_offset.y < min_pos.y) min_pos.y = pos_offset.y;
+									if (pos_offset.y > max_pos.y) max_pos.y = pos_offset.y;
+									if (pos_offset.z < min_pos.z) min_pos.z = pos_offset.z;
+									if (pos_offset.z > max_pos.z) max_pos.z = pos_offset.z;
+
+									indices.push_back(k);
+									delta_pos.push_back({ pos_offset.x, pos_offset.y, pos_offset.z });
+								}
+							}
+
+							if (indices.size() < 1)
+							{
+								indices.push_back(0);
+								delta_pos.push_back(glm::vec3(0.0f));
+							}
+
+							int num_verts = (int)indices.size();
+							acc_id = m_out.accessors.size();
+							if (is_sparse)
+							{
+								tinygltf::Accessor acc;
+								acc.byteOffset = 0;
+								acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+								acc.count = (size_t)(num_pos);
+								acc.type = TINYGLTF_TYPE_VEC3;
+								acc.sparse.isSparse = true;
+								acc.sparse.count = num_verts;
+
+								acc.maxValues = { max_pos.x, max_pos.y, max_pos.z };
+								acc.minValues = { min_pos.x, min_pos.y, min_pos.z };
+
+								offset = buf_out.data.size();
+								length = sizeof(int) * num_verts;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, indices.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.sparse.indices.bufferView = view_id;
+								acc.sparse.indices.byteOffset = 0;
+								acc.sparse.indices.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT;
+
+								offset = buf_out.data.size();
+								length = sizeof(glm::vec3) * num_verts;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, delta_pos.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.sparse.values.bufferView = view_id;
+								acc.sparse.values.byteOffset = 0;
+
+								m_out.accessors.push_back(acc);
+							}
+							else
+							{
+								tinygltf::Accessor acc;
+								acc.byteOffset = 0;
+								acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+								acc.count = (size_t)(num_pos);
+								acc.type = TINYGLTF_TYPE_VEC3;
+
+								acc.maxValues = { max_pos.x, max_pos.y, max_pos.z };
+								acc.minValues = { min_pos.x, min_pos.y, min_pos.z };
+
+								offset = buf_out.data.size();
+								length = sizeof(glm::vec3) * num_pos;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, delta_pos.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.bufferView = view_id;
+								acc.byteOffset = 0;
+								m_out.accessors.push_back(acc);
+
+							}
+
+							prim_out.targets[lChannelIndex]["POSITION"] = acc_id;
+						}
+
+						if (norm_offsets.size() > 0)
+						{
+							std::vector<int> indices;
+							std::vector<glm::vec3> delta_norm;
+
+							for (int k = 0; k < num_pos; k++)
+							{
+								if (non_zeros[k])
+								{
+									auto norm_offset = norm_offsets[k];
+									indices.push_back(k);
+									delta_norm.push_back({ norm_offset.x, norm_offset.y, norm_offset.z });
+								}
+							}
+
+							if (indices.size() < 1)
+							{
+								indices.push_back(0);
+								delta_norm.push_back(glm::vec3(0.0f));
+							}
+
+							int num_verts = (int)indices.size();
+							acc_id = m_out.accessors.size();
+							if (is_sparse)
+							{
+								tinygltf::Accessor acc;
+								acc.byteOffset = 0;
+								acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+								acc.count = (size_t)(num_pos);
+								acc.type = TINYGLTF_TYPE_VEC3;
+								acc.sparse.isSparse = true;
+								acc.sparse.count = num_verts;
+
+								offset = buf_out.data.size();
+								length = sizeof(int) * num_verts;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, indices.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.sparse.indices.bufferView = view_id;
+								acc.sparse.indices.byteOffset = 0;
+								acc.sparse.indices.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT;
+
+								offset = buf_out.data.size();
+								length = sizeof(glm::vec3) * num_verts;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, delta_norm.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.sparse.values.bufferView = view_id;
+								acc.sparse.values.byteOffset = 0;
+
+								m_out.accessors.push_back(acc);
+							}
+							else
+							{
+								tinygltf::Accessor acc;
+								acc.byteOffset = 0;
+								acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+								acc.count = (size_t)(num_pos);
+								acc.type = TINYGLTF_TYPE_VEC3;
+
+								offset = buf_out.data.size();
+								length = sizeof(glm::vec3) * num_pos;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, delta_norm.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.bufferView = view_id;
+								acc.byteOffset = 0;
+
+								m_out.accessors.push_back(acc);
+							}
+
+							prim_out.targets[lChannelIndex]["NORMAL"] = acc_id;
+						}
+
+
+					}
+				}
 
 				size_t uv_count = uv_out.size();
 				offset = buf_out.data.size();
@@ -1094,6 +1436,240 @@ int main(int argc, char* argv[])
 
 				prim_out.indices = acc_id;
 
+				int num_targets = offsets_in.size();
+				if (num_targets > 0)
+				{
+					prim_out.targets.resize(num_targets);
+					for (int lChannelIndex = 0; lChannelIndex < num_targets; ++lChannelIndex)
+					{
+						bool is_sparse = target_sparse[lChannelIndex];
+						auto& offsets = offsets_in[lChannelIndex];
+						auto& norm_offsets = norm_offsets_in[lChannelIndex];
+						auto& non_zeros = non_zeros_in[lChannelIndex];
+
+						size_t num_pos = points_in.size();
+
+						{
+							std::vector<int> indices;
+							std::vector<glm::vec3> delta_pos;
+							glm::vec3 min_pos = { 0.0f, 0.0f, 0.0f };
+							glm::vec3 max_pos = { 0.0f, 0.0f, 0.0f };
+
+							for (int k = 0; k < num_pos; k++)
+							{
+								if (non_zeros[k])
+								{
+									auto pos_offset = offsets[k];
+									if (pos_offset.x < min_pos.x) min_pos.x = pos_offset.x;
+									if (pos_offset.x > max_pos.x) max_pos.x = pos_offset.x;
+									if (pos_offset.y < min_pos.y) min_pos.y = pos_offset.y;
+									if (pos_offset.y > max_pos.y) max_pos.y = pos_offset.y;
+									if (pos_offset.z < min_pos.z) min_pos.z = pos_offset.z;
+									if (pos_offset.z > max_pos.z) max_pos.z = pos_offset.z;
+
+									indices.push_back(k);
+									delta_pos.push_back({ pos_offset.x, pos_offset.y, pos_offset.z });
+								}
+							}
+
+							if (indices.size() < 1)
+							{
+								indices.push_back(0);
+								delta_pos.push_back(glm::vec3(0.0f));
+							}
+
+							int num_verts = (int)indices.size();
+							acc_id = m_out.accessors.size();
+							if (is_sparse)
+							{
+								tinygltf::Accessor acc;
+								acc.byteOffset = 0;
+								acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+								acc.count = (size_t)(num_pos);
+								acc.type = TINYGLTF_TYPE_VEC3;
+								acc.sparse.isSparse = true;
+								acc.sparse.count = num_verts;
+
+								acc.maxValues = { max_pos.x, max_pos.y, max_pos.z };
+								acc.minValues = { min_pos.x, min_pos.y, min_pos.z };
+
+								offset = buf_out.data.size();
+								length = sizeof(int) * num_verts;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, indices.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.sparse.indices.bufferView = view_id;
+								acc.sparse.indices.byteOffset = 0;
+								acc.sparse.indices.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT;
+
+								offset = buf_out.data.size();
+								length = sizeof(glm::vec3) * num_verts;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, delta_pos.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.sparse.values.bufferView = view_id;
+								acc.sparse.values.byteOffset = 0;
+
+								m_out.accessors.push_back(acc);
+							}
+							else
+							{
+								tinygltf::Accessor acc;
+								acc.byteOffset = 0;
+								acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+								acc.count = (size_t)(num_pos);
+								acc.type = TINYGLTF_TYPE_VEC3;
+
+								acc.maxValues = { max_pos.x, max_pos.y, max_pos.z };
+								acc.minValues = { min_pos.x, min_pos.y, min_pos.z };
+
+								offset = buf_out.data.size();
+								length = sizeof(glm::vec3) * num_pos;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, delta_pos.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.bufferView = view_id;
+								acc.byteOffset = 0;
+								m_out.accessors.push_back(acc);
+
+							}
+
+							prim_out.targets[lChannelIndex]["POSITION"] = acc_id;
+						}
+
+						if (norm_offsets.size() > 0)
+						{
+							std::vector<int> indices;
+							std::vector<glm::vec3> delta_norm;
+
+							for (int k = 0; k < num_pos; k++)
+							{
+								if (non_zeros[k])
+								{
+									auto norm_offset = norm_offsets[k];
+									indices.push_back(k);
+									delta_norm.push_back({ norm_offset.x, norm_offset.y, norm_offset.z });
+								}								
+							}
+
+							if (indices.size() < 1)
+							{
+								indices.push_back(0);
+								delta_norm.push_back(glm::vec3(0.0f));
+							}
+
+							int num_verts = (int)indices.size();
+							acc_id = m_out.accessors.size();
+							if (is_sparse)
+							{
+								tinygltf::Accessor acc;
+								acc.byteOffset = 0;
+								acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+								acc.count = (size_t)(num_pos);
+								acc.type = TINYGLTF_TYPE_VEC3;
+								acc.sparse.isSparse = true;
+								acc.sparse.count = num_verts;
+
+								offset = buf_out.data.size();
+								length = sizeof(int) * num_verts;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, indices.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.sparse.indices.bufferView = view_id;
+								acc.sparse.indices.byteOffset = 0;
+								acc.sparse.indices.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT;
+
+								offset = buf_out.data.size();
+								length = sizeof(glm::vec3) * num_verts;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, delta_norm.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.sparse.values.bufferView = view_id;
+								acc.sparse.values.byteOffset = 0;
+
+								m_out.accessors.push_back(acc);
+							}
+							else
+							{
+								tinygltf::Accessor acc;
+								acc.byteOffset = 0;
+								acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+								acc.count = (size_t)(num_pos);
+								acc.type = TINYGLTF_TYPE_VEC3;
+
+								offset = buf_out.data.size();
+								length = sizeof(glm::vec3) * num_pos;
+								buf_out.data.resize(offset + length);
+								memcpy(buf_out.data.data() + offset, delta_norm.data(), length);
+
+								view_id = m_out.bufferViews.size();
+								{
+									tinygltf::BufferView view;
+									view.buffer = 0;
+									view.byteOffset = offset;
+									view.byteLength = length;
+									m_out.bufferViews.push_back(view);
+								}
+
+								acc.bufferView = view_id;
+								acc.byteOffset = 0;
+
+								m_out.accessors.push_back(acc);
+							}
+
+							prim_out.targets[lChannelIndex]["NORMAL"] = acc_id;
+						}
+
+
+					}
+
+				}
+
 				if (uv_in.size() > 0)
 				{
 					size_t uv_count;
@@ -1322,7 +1898,8 @@ int main(int argc, char* argv[])
 			skin_out.inverseBindMatrices = acc_id;
 		}
 
-		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL)
+		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL
+			&& prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_GEOM_MESH)
 		{			
 			size_t num_children = prim.prim->children().size();
 			for (size_t i = 0; i < num_children; i++)
@@ -1571,7 +2148,6 @@ int main(int argc, char* argv[])
 			bool has_translations = anim_in->translations.get_value().has_value();
 			bool has_rotations = anim_in->rotations.get_value().has_value();
 			bool has_scales = anim_in->scales.get_value().has_value();
-
 
 			auto joints = anim_in->joints.get_value().value();
 			for (size_t i = 0; i < joints.size(); i++)
@@ -1850,12 +2426,29 @@ int main(int argc, char* argv[])
 				}
 
 #endif			
-
 			}
 
+			/*
+			if (anim_in->blendShapes.get_value().has_value())
+			{
+				auto bs_names = anim_in->blendShapes.get_value().value();
+				std::vector<MorphIdx> morphIdx(bs_names.size());
+				for (size_t i = 0; i < bs_names.size(); i++)
+				{
+					morphIdx[i] = morph_map[bs_names[i].str()];
+				}
+
+				auto weights = anim_in->blendShapeWeights.get_value().value().get_timesamples().get_samples();
+
+				int id_channel = (int)anim_out.channels.size();
+				anim_out.channels.resize(id_channel + bs_names.size());
+				tinygltf::AnimationChannel& channel = anim_out.channels[id_channel];
+
+			}*/
 		}
 
-		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL)
+		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL
+			&& prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_GEOM_MESH)
 		{
 			int id_node_base = (int)(m_out.nodes.size() - 1);
 			size_t num_children = prim.prim->children().size();
