@@ -395,13 +395,14 @@ int main(int argc, char* argv[])
 	std::unordered_map<int, std::string> node_skin_map;
 	std::unordered_map<std::string, int> skin_map;
 
-	/*struct MorphIdx
+	struct MorphIdx
 	{
 		int node_idx;
 		int morph_idx;
 	};
 
-	std::unordered_map<std::string, MorphIdx> morph_map;*/
+	std::unordered_map<std::string, std::vector<MorphIdx>> morph_map;
+	std::unordered_map<int, int> target_counts;
 
 	queue_prim.push({ root_prim, -1, "" });
 	while (!queue_prim.empty())
@@ -699,10 +700,13 @@ int main(int argc, char* argv[])
 					norm_offsets_in.resize(num_morphs);
 					target_sparse.resize(num_morphs, false);
 					non_zeros_in.resize(num_morphs);
+
+					target_counts[node_id] = (int)num_morphs;
+
 					for (size_t i = 0; i < num_morphs; i++)
 					{						
 						std::string name = names[i].str();
-						 // morph_map[name] = { node_id, (int)i };
+						morph_map[name].push_back({ node_id, (int)i });
 
 						const tinyusdz::Prim* primbs = stage.GetPrimAtPath(paths[i]).value();
 						auto* bs = primbs->data().as<tinyusdz::BlendShape>();
@@ -2427,24 +2431,149 @@ int main(int argc, char* argv[])
 
 #endif			
 			}
-
-			/*
+			
 			if (anim_in->blendShapes.get_value().has_value())
 			{
 				auto bs_names = anim_in->blendShapes.get_value().value();
-				std::vector<MorphIdx> morphIdx(bs_names.size());
+				std::vector<std::vector<MorphIdx>> morphIdx(bs_names.size());
 				for (size_t i = 0; i < bs_names.size(); i++)
 				{
-					morphIdx[i] = morph_map[bs_names[i].str()];
+					auto iter = morph_map.find(bs_names[i].str());
+					if (iter != morph_map.end())
+					{
+						morphIdx[i] = iter->second;
+					}
 				}
 
+				struct MorphChannel
+				{
+					std::vector<float> times;
+					std::vector<float> weights;
+				};
+
+				std::unordered_map<int, MorphChannel> mchans;
+
 				auto weights = anim_in->blendShapeWeights.get_value().value().get_timesamples().get_samples();
+				size_t num_time_samples = weights.size();
+
+				for (size_t i = 0; i < morphIdx.size(); i++)
+				{
+					auto targets = morphIdx[i];
+					for (size_t j = 0; j < targets.size(); j++)
+					{
+						auto target = targets[j];
+						auto iter = mchans.find(target.node_idx);
+						if (iter == mchans.end())
+						{
+							int num_targets = target_counts[target.node_idx];
+							mchans[target.node_idx] = { std::vector<float>(num_time_samples),std::vector<float>(num_time_samples* num_targets)};
+						}
+					}
+				}
+
+				
+				for (size_t i = 0; i < weights.size(); i++)
+				{
+					float t = (float)(weights[i].t/ time_codes_per_sec);
+					auto v = weights[i].value;
+					for (size_t j = 0; j < v.size(); j++)
+					{
+						float w = v[j];
+						auto targets = morphIdx[j];
+						for (size_t k = 0; k < targets.size(); k++)
+						{
+							auto target = targets[k];
+							auto& mchan = mchans[target.node_idx];
+							int num_targets = target_counts[target.node_idx];
+							mchan.times[i] = t;
+							mchan.weights[i * num_targets + target.morph_idx] = w;
+						}
+					}
+				}
 
 				int id_channel = (int)anim_out.channels.size();
-				anim_out.channels.resize(id_channel + bs_names.size());
-				tinygltf::AnimationChannel& channel = anim_out.channels[id_channel];
+				anim_out.channels.resize(id_channel + mchans.size());
+				
+				auto iter = mchans.begin();
+				while (iter != mchans.end())
+				{
+					tinygltf::AnimationChannel& channel = anim_out.channels[id_channel];
+					int id_node = iter->first;
+					MorphChannel& mchan = iter->second;
 
-			}*/
+					channel.target_node = id_node;
+					channel.target_path = "weights";
+
+					int id_sampler = (int)anim_out.samplers.size();
+					channel.sampler = id_sampler;
+
+					anim_out.samplers.resize(id_sampler + 1);
+					tinygltf::AnimationSampler& sampler = anim_out.samplers[id_sampler];
+					
+					float t0 = mchan.times[0];
+					float t1 = mchan.times[mchan.times.size() - 1];
+
+					offset = buf_out.data.size();
+					length = sizeof(float) * mchan.times.size();
+					buf_out.data.resize(offset + length);
+					memcpy(buf_out.data.data() + offset, mchan.times.data(), length);
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = mchan.times.size();
+						acc.type = TINYGLTF_TYPE_SCALAR;
+						acc.minValues = { t0 };
+						acc.maxValues = { t1 };
+						m_out.accessors.push_back(acc);
+					}
+					sampler.input = acc_id;
+
+					offset = buf_out.data.size();
+					length = sizeof(float) * mchan.weights.size();
+					buf_out.data.resize(offset + length);
+					memcpy(buf_out.data.data() + offset, mchan.weights.data(), length);
+
+					view_id = m_out.bufferViews.size();
+					{
+						tinygltf::BufferView view;
+						view.buffer = 0;
+						view.byteOffset = offset;
+						view.byteLength = length;
+						m_out.bufferViews.push_back(view);
+					}
+
+					acc_id = m_out.accessors.size();
+					{
+						tinygltf::Accessor acc;
+						acc.bufferView = view_id;
+						acc.byteOffset = 0;
+						acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						acc.count = mchan.weights.size();
+						acc.type = TINYGLTF_TYPE_SCALAR;
+						m_out.accessors.push_back(acc);
+					}
+
+					sampler.output = acc_id;
+
+					id_channel++;
+					iter++;
+				}
+				
+
+			}
 		}
 
 		if (prim.prim->data().type_id() != tinyusdz::value::TYPE_ID_MATERIAL
