@@ -31,7 +31,7 @@ bool IsLerpSupportedType(uint32_t tyid) {
 
   // See underlying_type_id to simplify check for Role types(e.g. color3f)
 #define IS_SUPPORTED_TYPE(__tyid, __ty) \
-  if (__tyid == value::TypeTraits<__ty>::underlying_type_id) return true 
+  if (__tyid == value::TypeTraits<__ty>::underlying_type_id()) return true 
 
   IS_SUPPORTED_TYPE(tyid, value::half);
   IS_SUPPORTED_TYPE(tyid, value::half2);
@@ -76,7 +76,7 @@ bool Lerp(const value::Value &a, const value::Value &b, double dt, value::Value 
   value::Value result;
 
 #define DO_LERP(__ty) \
-  if (tyid == value::TypeTraits<__ty>::type_id) { \
+  if (tyid == value::TypeTraits<__ty>::type_id()) { \
     const __ty *v0 = a.as<__ty>(); \
     const __ty *v1 = b.as<__ty>(); \
     __ty c; \
@@ -770,6 +770,268 @@ half float_to_half_full(float _f) {
   ///???
   half fp16{0};  // TODO: Raise exception or return NaN
   return fp16;
+}
+
+size_t Value::array_size() const {
+  if (!is_array()) {
+    return 0;
+  }
+
+  // primvar types only.
+
+#define APPLY_FUNC_TO_TYPES(__FUNC) \
+  __FUNC(bool)                 \
+  __FUNC(value::token)                 \
+  __FUNC(std::string)                 \
+  __FUNC(StringData)                 \
+  __FUNC(half)                 \
+  __FUNC(half2)                \
+  __FUNC(half3)                \
+  __FUNC(half4)                \
+  __FUNC(int32_t)              \
+  __FUNC(uint32_t)             \
+  __FUNC(int2)                 \
+  __FUNC(int3)                 \
+  __FUNC(int4)                 \
+  __FUNC(uint2)                \
+  __FUNC(uint3)                \
+  __FUNC(uint4)                \
+  __FUNC(int64_t)              \
+  __FUNC(uint64_t)             \
+  __FUNC(float)                \
+  __FUNC(float2)               \
+  __FUNC(float3)               \
+  __FUNC(float4)               \
+  __FUNC(double)               \
+  __FUNC(double2)              \
+  __FUNC(double3)              \
+  __FUNC(double4)              \
+  __FUNC(quath)                \
+  __FUNC(quatf)                \
+  __FUNC(quatd)                \
+  __FUNC(normal3h)             \
+  __FUNC(normal3f)             \
+  __FUNC(normal3d)             \
+  __FUNC(vector3h)             \
+  __FUNC(vector3f)             \
+  __FUNC(vector3d)             \
+  __FUNC(point3h)              \
+  __FUNC(point3f)              \
+  __FUNC(point3d)              \
+  __FUNC(color3f)              \
+  __FUNC(color3d)              \
+  __FUNC(color4h)              \
+  __FUNC(color4f)              \
+  __FUNC(color4d)              \
+  __FUNC(texcoord2h)           \
+  __FUNC(texcoord2f)           \
+  __FUNC(texcoord2d)           \
+  __FUNC(texcoord3h)           \
+  __FUNC(texcoord3f)           \
+  __FUNC(texcoord3d) \
+  __FUNC(matrix2d) \
+  __FUNC(matrix3d) \
+  __FUNC(matrix4d) \
+  __FUNC(frame4d) 
+
+#define ARRAY_SIZE_GET(__ty) case value::TypeTraits<__ty>::type_id() | value::TYPE_ID_1D_ARRAY_BIT: { \
+    if (auto pv = v_.cast<std::vector<__ty>>()) { \
+      return pv->size(); \
+    } \
+    return 0; \
+  }
+
+
+  switch (v_.type_id()) {
+    APPLY_FUNC_TO_TYPES(ARRAY_SIZE_GET) 
+    default:
+      return 0;
+  }
+
+#undef ARRAY_SIZE_GET
+#undef APPLY_FUNC_TO_TYPES
+
+}
+
+bool RoleTypeCast(const uint32_t roleTyId, value::Value &inout) {
+  const uint32_t srcUnderlyingTyId = inout.underlying_type_id();
+
+  DCOUT("input type = " << inout.type_name());
+
+  // scalar and array
+#define ROLE_TYPE_CAST(__roleTy, __srcBaseTy)                                  \
+  {                                                                            \
+    static_assert(value::TypeTraits<__roleTy>::size() ==                       \
+                      value::TypeTraits<__srcBaseTy>::size(),                  \
+                  "");                                                         \
+    if (srcUnderlyingTyId == value::TypeTraits<__srcBaseTy>::type_id()) {      \
+      if (roleTyId == value::TypeTraits<__roleTy>::type_id()) {                \
+        if (auto pv = inout.get_value<__srcBaseTy>()) {                        \
+          __srcBaseTy val = pv.value();                                        \
+          __roleTy newval;                                                     \
+          memcpy(&newval, &val, sizeof(__srcBaseTy));                          \
+          inout = newval;                                                      \
+          return true;                                                         \
+        }                                                                      \
+      }                                                                        \
+    } else if (srcUnderlyingTyId ==                                            \
+               (value::TypeTraits<__srcBaseTy>::type_id() |                    \
+                value::TYPE_ID_1D_ARRAY_BIT)) {                                \
+      if (roleTyId == value::TypeTraits<std::vector<__roleTy>>::type_id()) {   \
+        if (auto pv = inout.get_value<std::vector<__srcBaseTy>>()) {           \
+          std::vector<__srcBaseTy> val = pv.value();                           \
+          std::vector<__roleTy> newval;                                        \
+          newval.resize(val.size());                                           \
+          memcpy(newval.data(), val.data(), sizeof(__srcBaseTy) * val.size()); \
+          inout = newval;                                                      \
+          return true;                                                         \
+        }                                                                      \
+      }                                                                        \
+    }                                                                          \
+  }
+
+  ROLE_TYPE_CAST(value::texcoord2h, value::half2)
+  ROLE_TYPE_CAST(value::texcoord2f, value::float2)
+  ROLE_TYPE_CAST(value::texcoord2d, value::double2)
+
+  ROLE_TYPE_CAST(value::texcoord3h, value::half3)
+  ROLE_TYPE_CAST(value::texcoord3f, value::float3)
+  ROLE_TYPE_CAST(value::texcoord3d, value::double3)
+
+  ROLE_TYPE_CAST(value::normal3h, value::half3)
+  ROLE_TYPE_CAST(value::normal3f, value::float3)
+  ROLE_TYPE_CAST(value::normal3d, value::double3)
+
+  ROLE_TYPE_CAST(value::vector3h, value::half3)
+  ROLE_TYPE_CAST(value::vector3f, value::float3)
+  ROLE_TYPE_CAST(value::vector3d, value::double3)
+
+  ROLE_TYPE_CAST(value::point3h, value::half3)
+  ROLE_TYPE_CAST(value::point3f, value::float3)
+  ROLE_TYPE_CAST(value::point3d, value::double3)
+
+  ROLE_TYPE_CAST(value::color3h, value::half3)
+  ROLE_TYPE_CAST(value::color3f, value::float3)
+  ROLE_TYPE_CAST(value::color3d, value::double3)
+
+  ROLE_TYPE_CAST(value::color4h, value::half4)
+  ROLE_TYPE_CAST(value::color4f, value::float4)
+  ROLE_TYPE_CAST(value::color4d, value::double4)
+
+  ROLE_TYPE_CAST(value::frame4d, value::matrix4d)
+
+#undef ROLE_TYPE_CAST
+
+  return false;
+}
+
+// TODO: Use template 
+bool UpcastType(const std::string &reqType, value::Value &inout) {
+  // `reqType` may be Role type. Get underlying type
+  uint32_t tyid;
+  if (auto pv = value::TryGetUnderlyingTypeId(reqType)) {
+    tyid = pv.value();
+  } else {
+    // Invalid reqType.
+    return false;
+  }
+
+  bool reqTypeArray = false;
+  //uint32_t baseReqTyId;
+  DCOUT("UpcastType trial: reqTy : " << reqType
+                                     << ", valtype = " << inout.type_name());
+
+  if (endsWith(reqType, "[]")) {
+    reqTypeArray = true;
+    //baseReqTyId = value::GetTypeId(removeSuffix(reqType, "[]"));
+  } else {
+    //baseReqTyId = value::GetTypeId(reqType);
+  }
+  DCOUT("is array: " << reqTypeArray);
+
+  // For array
+  if (reqTypeArray) {
+    // TODO
+  } else {
+    if (tyid == value::TYPE_ID_FLOAT) {
+      float dst;
+      if (auto pv = inout.get_value<value::half>()) {
+        dst = half_to_float(pv.value());
+        inout = dst;
+        return true;
+      }
+    } else if (tyid == value::TYPE_ID_FLOAT2) {
+      if (auto pv = inout.get_value<value::half2>()) {
+        value::float2 dst;
+        value::half2 v = pv.value();
+        dst[0] = half_to_float(v[0]);
+        dst[1] = half_to_float(v[1]);
+        inout = dst;
+        return true;
+      }
+
+    } else if (tyid == value::TYPE_ID_FLOAT3) {
+      value::float3 dst;
+      if (auto pv = inout.get_value<value::half3>()) {
+        value::half3 v = pv.value();
+        dst[0] = half_to_float(v[0]);
+        dst[1] = half_to_float(v[1]);
+        dst[2] = half_to_float(v[2]);
+        inout = dst;
+        return true;
+      }
+    } else if (tyid == value::TYPE_ID_FLOAT4) {
+      value::float4 dst;
+      if (auto pv = inout.get_value<value::half4>()) {
+        value::half4 v = pv.value();
+        dst[0] = half_to_float(v[0]);
+        dst[1] = half_to_float(v[1]);
+        dst[2] = half_to_float(v[2]);
+        dst[3] = half_to_float(v[3]);
+        inout = dst;
+        return true;
+      }
+    } else if (tyid == value::TYPE_ID_DOUBLE) {
+      double dst;
+      if (auto pv = inout.get_value<value::half>()) {
+        dst = double(half_to_float(pv.value()));
+        inout = dst;
+        return true;
+      }
+    } else if (tyid == value::TYPE_ID_DOUBLE2) {
+      value::double2 dst;
+      if (auto pv = inout.get_value<value::half2>()) {
+        value::half2 v = pv.value();
+        dst[0] = double(half_to_float(v[0]));
+        dst[1] = double(half_to_float(v[1]));
+        inout = dst;
+        return true;
+      }
+    } else if (tyid == value::TYPE_ID_DOUBLE3) {
+      value::double3 dst;
+      if (auto pv = inout.get_value<value::half3>()) {
+        value::half3 v = pv.value();
+        dst[0] = double(half_to_float(v[0]));
+        dst[1] = double(half_to_float(v[1]));
+        dst[2] = double(half_to_float(v[2]));
+        inout = dst;
+        return true;
+      }
+    } else if (tyid == value::TYPE_ID_DOUBLE4) {
+      value::double4 dst;
+      if (auto pv = inout.get_value<value::half4>()) {
+        value::half4 v = pv.value();
+        dst[0] = double(half_to_float(v[0]));
+        dst[1] = double(half_to_float(v[1]));
+        dst[2] = double(half_to_float(v[2]));
+        dst[3] = double(half_to_float(v[3]));
+        inout = dst;
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 

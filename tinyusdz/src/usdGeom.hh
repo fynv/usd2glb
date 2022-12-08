@@ -25,6 +25,195 @@ constexpr auto kGeomSphere = "Sphere";
 constexpr auto kGeomCamera = "Camera";
 constexpr auto kPointInstancer = "PointInstancer";
 
+constexpr auto kMaterialBinding = "material:binding";
+constexpr auto kMaterialBindingCorrection = "material:binding:correction";
+constexpr auto kMaterialBindingPreview = "material:binding:preview";
+
+struct GPrim;
+
+bool IsSupportedGeomPrimvarType(uint32_t tyid);
+bool IsSupportedGeomPrimvarType(const std::string &type_name);
+  
+//
+// GeomPrimvar is a wrapper class for Attribute and indices(for Indexed Primvar)
+// - Attribute with `primvars` prefix. e.g. "primvars:
+// - Optional: indices.
+//
+// GeomPrimvar is only constructable from GPrim.
+// This class COPIES variable from GPrim when get operation.
+//
+// Currently read-only operation are well provided. writing feature is not well tested(`set_value` may have issue)
+// (If you struggled to ue GeomPrimvar, please operate on `GPrim::props` directly)
+//
+// Limitation:
+// TimeSamples are not supported for indices.
+// Also, TimeSamples are not supported both when constructing GeomPrimvar with Typed Attribute value and retriving Attribute value.
+//
+//
+class GeomPrimvar {
+
+ friend GPrim;
+
+ public:
+  GeomPrimvar() : _has_value(false) {
+  }
+
+  GeomPrimvar(const Attribute &attr) : _attr(attr) {
+    _has_value = true;
+  }
+
+  // TODO: TimeSamples indices.
+  GeomPrimvar(const Attribute &attr, const std::vector<int32_t> &indices) : _attr(attr), _indices(indices) 
+  {
+    _has_value = true;
+  }
+
+  GeomPrimvar(const GeomPrimvar &rhs) {
+    _name = rhs._name;
+    _attr = rhs._attr;
+    _indices = rhs._indices;
+    _has_value = rhs._has_value;
+    if (rhs._elementSize) {
+      _elementSize = rhs._elementSize;
+    }
+
+    if (rhs._interpolation) {
+      _interpolation = rhs._interpolation;
+    }
+  }
+
+  GeomPrimvar &operator=(const GeomPrimvar &rhs) {
+    _name = rhs._name;
+    _attr = rhs._attr;
+    _indices = rhs._indices;
+    _has_value = rhs._has_value;
+    if (rhs._elementSize) {
+      _elementSize = rhs._elementSize;
+    }
+
+    if (rhs._interpolation) {
+      _interpolation = rhs._interpolation;
+    }
+
+    return *this;
+  }
+
+  ///
+  /// For Indexed Primvar(array value + indices)
+  ///
+  /// equivalent to ComputeFlattened in pxrUSD.
+  ///
+  /// ```
+  /// for i in len(indices):
+  ///   dest[i] = values[indices[i]]
+  /// ```
+  ///
+  /// If Primvar does not have indices, return attribute value as is(same with `get_value`).
+  ///
+  /// Return false when operation failed or if the attribute type is not supported for Indexed Primvar.
+  ///
+  template <typename T>
+  bool flatten_with_indices(T *dst, std::string *err = nullptr);
+
+  template <typename T>
+  bool flatten_with_indices(std::vector<T> *dst, std::string *err = nullptr);
+
+  // Generic Value version.
+  bool flatten_with_indices(value::Value *dst, std::string *err = nullptr);
+
+  bool has_elementSize() const;
+  uint32_t get_elementSize() const;
+  
+  bool has_interpolation() const;
+  Interpolation get_interpolation() const;
+
+  void set_elementSize(uint32_t n) {
+    _elementSize = n;
+  }
+
+  void set_interpolation(const Interpolation interp) {
+    _interpolation = interp;
+  }
+
+  const std::vector<int32_t> &get_indices() const { return _indices; }
+  bool has_indices() const { return _indices.size(); }
+
+  uint32_t type_id() { return _attr.type_id(); }
+  std::string type_name() { return _attr.type_name(); }
+
+  // Name of Primvar. "primvars:" prefix(namespace) is omitted.
+  const std::string name() const { return _name; }
+
+  ///
+  /// Attribute has value?(Not empty)
+  ///
+  bool has_value() const {
+    return _has_value;
+  }
+
+
+  ///
+  /// Get Attribute value.
+  /// TODO: TimeSamples
+  ///
+  template <typename T>
+  bool get_value(T *dst, std::string *err = nullptr);
+
+  bool get_value(value::Value *dst, std::string *err = nullptr);
+
+  ///
+  /// Set Attribute value.
+  ///
+  template <typename T>
+  void set_value(const T &val) {
+    _attr.set_value(val);
+    _has_value = true;
+  }
+
+  void set_value(const Attribute &attr) {
+    _attr = attr;
+    _has_value = true;
+  }
+
+  void set_value(const Attribute &&attr) {
+    _attr = std::move(attr);
+    _has_value = true;
+  }
+
+  void set_name(const std::string &name) { _name = name; }
+
+  void set_indices(const std::vector<int32_t> &indices) {
+    _indices = indices;
+  }
+
+  void set_indices(const std::vector<int32_t> &&indices) {
+    _indices = std::move(indices);
+  }
+
+  const Attribute &get_attribute() const {
+    return _attr;
+  }
+
+ private:
+
+  std::string _name;
+  bool _has_value{false};
+  Attribute _attr;
+  std::vector<int32_t> _indices;  // TODO: uint support?
+
+  // Store Attribute meta separately.
+  nonstd::optional<uint32_t> _elementSize;
+  nonstd::optional<Interpolation> _interpolation;
+
+#if 0 // TODO
+  bool get_value(const value::Value *value,
+                 const double t = value::TimeCode::Default(),
+                 const value::TimeSampleInterpolationType tinterp =
+                     value::TimeSampleInterpolationType::Held);
+#endif
+
+};
+
 // Geometric Prim. Encapsulates Imagable + Boundable in pxrUSD schema.
 // <pxrUSD>/pxr/usd/usdGeom/schema.udsa
 
@@ -35,6 +224,17 @@ struct GPrim : Xformable {
   int64_t parent_id{-1};  // Index to parent node
 
   std::string prim_type;  // Primitive type(if specified by `def`)
+
+  void set_name(const std::string &name_) {
+    name = name_;
+  }
+
+  const std::string &get_name() const {
+    return name;
+  }
+
+  Specifier &specifier() { return spec; }
+  const Specifier &specifier() const { return spec; }
 
   // Gprim
 
@@ -52,14 +252,17 @@ struct GPrim : Xformable {
   TypedAttributeWithFallback<Purpose> purpose{
       Purpose::Default};  // "uniform token purpose"
 
-#if 0  // TODO: Remove. Please use `props["primvars:displayColor"]`
-  TypedAttribute<Animatable<value::color3f>>
-      displayColor;                                    // primvars:displayColor
-  TypedAttribute<Animatable<float>> displayOpacity;  // primvars:displaOpacity
-#endif
+  // Handy API to get `primvars:displayColor` and `primvars:displayOpacity`
+  bool get_displayColor(value::color3f *col, const double t = value::TimeCode::Default(), const value::TimeSampleInterpolationType tinterp = value::TimeSampleInterpolationType::Held);
+
+  bool get_displayOpacity(float *opacity, const double t = value::TimeCode::Default(), const value::TimeSampleInterpolationType tinterp = value::TimeSampleInterpolationType::Held);
 
   nonstd::optional<Relationship> proxyPrim;
-  nonstd::optional<MaterialBindingAPI> materialBinding;
+
+  // Some frequently used materialBindings
+  nonstd::optional<Relationship> materialBinding; // material:binding
+  nonstd::optional<Relationship> materialBindingCorrection; // material:binding:correction
+  nonstd::optional<Relationship> materialBindingPreview; // material:binding:preview
 
   std::map<std::string, Property> props;
 
@@ -69,6 +272,65 @@ struct GPrim : Xformable {
 
   // Prim metadataum.
   PrimMeta meta;
+
+  // For GeomPrimvar.
+
+  ///
+  /// Get Attribute(+ indices Attribute for Indexed Primvar) with "primvars:" suffix(namespace) in `props`
+  ///
+  /// @param[in] name Primvar name(`primvars:` prefix omitted. e.g. "normals", "st0", ...)
+  /// @param[out] primvar GeomPrimvar output.
+  /// @param[out] err Optional Error message(filled when returning false)
+  ///
+  bool get_primvar(const std::string &name, GeomPrimvar *primvar, std::string *err = nullptr) const;
+
+  ///
+  /// Check if primvar exists with given name
+  ///
+  /// @param[in] name Primvar name(`primvars:` prefix omitted. e.g. "normals", "st0", ...)
+  ///
+  bool has_primvar(const std::string &name) const;
+  
+  ///
+  /// Return List of Primvar in this GPrim contains.
+  ///
+  std::vector<GeomPrimvar> get_primvars() const;
+
+  ///
+  /// Set Attribute(+ indices Attribute for Indexed Primvar) with "primvars:" suffix(namespace) to `props`
+  ///
+  /// @param[in] primvar GeomPrimvar
+  /// @param[out] err Optional Error message(filled when returning false)
+  ///
+  /// Returns true when success to add primvar. Return false on error(e.g. `primvar` does not contain valid name).
+  ///
+  bool set_primvar(const GeomPrimvar &primvar, std::string *err = nullptr);
+
+
+  ///
+  /// Aux infos
+  ///
+  std::vector<value::token> &primChildrenNames() {
+    return _primChildrenNames;
+  }
+
+  std::vector<value::token> &propertyNames() {
+    return _propertyNames;
+  }
+
+  const std::vector<value::token> &primChildrenNames() const {
+    return _primChildrenNames;
+  }
+
+  const std::vector<value::token> &propertyNames() const {
+    return _propertyNames;
+  }
+
+ private:
+
+  std::vector<value::token> _primChildrenNames;
+  std::vector<value::token> _propertyNames; 
+
 };
 
 struct Xform : GPrim {
@@ -86,7 +348,7 @@ struct GeomSubset {
   };
 
   std::string name;
-  Specifier spec;
+  Specifier spec{Specifier::Def};
 
   int64_t parent_id{-1};  // Index to parent node
 
@@ -169,17 +431,19 @@ struct GeomMesh : GPrim {
       faceVertexIndices;  // int[] faceVertexIndices
 
   // Make SkelBindingAPI first citizen.
-  nonstd::optional<Path> skeleton;  // rel skel:skeleton
+  nonstd::optional<Relationship> skeleton;  // rel skel:skeleton
 
   //
   // Utility functions
   //
 
+#if 0 // TODO: Remove
   // Initialize GeomMesh by GPrim(prepend references)
   void Initialize(const GPrim &pprim);
 
   // Update GeomMesh by GPrim(append references)
   void UpdateBy(const GPrim &pprim);
+#endif
 
   ///
   /// @brief Returns `points`.
@@ -189,7 +453,7 @@ struct GeomMesh : GPrim {
   /// @return points vector(copied). Returns empty when `points` attribute is
   /// not defined.
   ///
-  const std::vector<value::point3f> GetPoints(
+  const std::vector<value::point3f> get_points(
       double time = value::TimeCode::Default(),
       value::TimeSampleInterpolationType interp =
           value::TimeSampleInterpolationType::Linear) const;
@@ -202,7 +466,7 @@ struct GeomMesh : GPrim {
   /// `primvars:normals` nor `normals` attribute defined, attribute is a
   /// relation or normals attribute have invalid type(other than `normal3f`).
   ///
-  const std::vector<value::normal3f> GetNormals(
+  const std::vector<value::normal3f> get_normals(
       double time = value::TimeCode::Default(),
       value::TimeSampleInterpolationType interp =
           value::TimeSampleInterpolationType::Linear) const;
@@ -211,21 +475,21 @@ struct GeomMesh : GPrim {
   /// @brief Get interpolation of `primvars:normals`, then `normals`.
   /// @return Interpolation of normals. `vertex` by defaut.
   ///
-  Interpolation GetNormalsInterpolation() const;
+  Interpolation get_normalsInterpolation() const;
 
   ///
   /// @brief Returns `faceVertexCounts`.
   ///
   /// @return face vertex counts vector(copied)
   ///
-  const std::vector<int32_t> GetFaceVertexCounts() const;
+  const std::vector<int32_t> get_faceVertexCounts() const;
 
   ///
   /// @brief Returns `faceVertexIndices`.
   ///
   /// @return face vertex indices vector(copied)
   ///
-  const std::vector<int32_t> GetFaceVertexIndices() const;
+  const std::vector<int32_t> get_faceVertexIndices() const;
 
   //
   // SubD attribs.
@@ -252,12 +516,13 @@ struct GeomMesh : GPrim {
           FaceVaryingLinearInterpolation::
               CornersPlus1};  // token faceVaryingLinearInterpolation
 
+  TypedAttribute<std::vector<value::token>> blendShapes; // uniform token[] skel:blendShapes
+  nonstd::optional<Relationship> blendShapeTargets; // rel skel:blendShapeTargets (Path[])
+
   //
-  // TODO: Make SkelBindingAPI property first citizen
+  // TODO: Make these primvars first citizen?
   // - int[] primvars:skel:jointIndices
   // - float[] primvars:skel:jointWeights
-  // - uniform token[] skel:blendShapes
-  // - uniform token[] skel:blendShapeTargets
 
   //
   // GeomSubset
@@ -439,6 +704,7 @@ struct PointInstancer : public GPrim {
   TypedAttribute<Animatable<std::vector<int64_t>>>
       invisibleIds;  // int64[] invisibleIds
 };
+
 
 // import DEFINE_TYPE_TRAIT and DEFINE_ROLE_TYPE_TRAIT
 #include "define-type-trait.inc"

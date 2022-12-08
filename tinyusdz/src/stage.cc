@@ -50,17 +50,18 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "usdLux.hh"
 #include "usdShade.hh"
 #include "value-pprint.hh"
+#include "usda-reader.hh"
+#include "io-util.hh"
+#include "tiny-format.hh"
 //
 #include "common-macros.inc"
 
 namespace tinyusdz {
 
-#if 0
+#if 1
 // For PUSH_ERROR_AND_RETURN
 #define PushError(s) \
-  if (err) {         \
-    (*err) += s;     \
-  }
+  _err += s;
 //#define PushWarn(s) if (warn) { (*warn) += s; }
 #endif
 
@@ -176,10 +177,11 @@ nonstd::optional<const Prim *> GetPrimAtPathRec(const Prim *parent,
 
 nonstd::expected<const Prim *, std::string> Stage::GetPrimAtPath(
     const Path &path) const {
-  DCOUT("GerPrimAtPath : " << path.prim_part() << "(input path: " << path
+  DCOUT("GetPrimAtPath : " << path.prim_part() << "(input path: " << path
                            << ")");
 
   if (_dirty) {
+    DCOUT("clear cache.");
     // Clear cache.
     _prim_path_cache.clear();
 
@@ -188,20 +190,24 @@ nonstd::expected<const Prim *, std::string> Stage::GetPrimAtPath(
     // First find from a cache.
     auto ret = _prim_path_cache.find(path.prim_part());
     if (ret != _prim_path_cache.end()) {
+      DCOUT("Found cache.");
       return ret->second;
     }
   }
 
   if (!path.is_valid()) {
+    DCOUT("Invalid path.");
     return nonstd::make_unexpected("Path is invalid.\n");
   }
 
   if (path.is_relative_path()) {
+    DCOUT("Relative path is todo.");
     // TODO:
     return nonstd::make_unexpected("Relative path is TODO.\n");
   }
 
   if (!path.is_absolute_path()) {
+    DCOUT("Not absolute path.");
     return nonstd::make_unexpected(
         "Path is not absolute. Non-absolute Path is TODO.\n");
   }
@@ -217,6 +223,7 @@ nonstd::expected<const Prim *, std::string> Stage::GetPrimAtPath(
     }
   }
 
+  DCOUT("Not found.");
   return nonstd::make_unexpected("Cannot find path <" + path.full_path_name() +
                                  "> int the Stage.\n");
 }
@@ -233,6 +240,73 @@ bool Stage::find_prim_at_path(const Path &path, const Prim *&prim,
     }
     return false;
   }
+}
+
+namespace {
+
+bool FindPrimByPrimIdRec(uint64_t prim_id, const Prim *root, const Prim **primFound, int level, std::string *err) {
+
+  if (level > 1024*1024*128) {
+    // too deep node.
+    return false;
+  }
+
+  if (!primFound) {
+    return false;
+  }
+
+  if (root->prim_id() == int64_t(prim_id)) {
+    (*primFound) = root;
+    return true;
+  }
+
+  // Brute-force search.
+  for (const auto &child : root->children()) {
+    if (FindPrimByPrimIdRec(prim_id, &child, primFound, level+1, err)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+} // namespace local
+
+bool Stage::find_prim_by_prim_id(const uint64_t prim_id, const Prim *&prim,
+                              std::string *err) const {
+  if (prim_id < 1) {
+    if (err) {
+      (*err) = "Input prim_id must be 1 or greater.";
+    }
+    return false;
+  }
+
+  if (_prim_id_dirty) {
+    DCOUT("clear prim_id cache.");
+    // Clear cache.
+    _prim_id_cache.clear();
+
+    _prim_id_dirty = false;
+  } else {
+    // First find from a cache.
+    auto ret = _prim_id_cache.find(prim_id);
+    if (ret != _prim_id_cache.end()) {
+      DCOUT("Found cache.");
+      return ret->second;
+    }
+  }
+
+  const Prim *p{nullptr};
+  for (const auto &root : root_prims()) {
+    if (FindPrimByPrimIdRec(prim_id, &root, &p, 0, err)) {
+      _prim_id_cache[prim_id] = p;
+      prim = p;
+      return true;
+    }
+  }
+
+  return false;
+
 }
 
 nonstd::expected<const Prim *, std::string> Stage::GetPrimFromRelativePath(
@@ -293,6 +367,51 @@ bool Stage::find_prim_from_relative_path(const Prim &root,
   }
 }
 
+bool Stage::LoadLayerFromMemory(const uint8_t *addr, const size_t nbytes, const std::string &asset_name, const LoadState load_state, Layer *layer) {
+
+  // TODO: USDC/USDZ support.
+
+  tinyusdz::StreamReader sr(addr, nbytes, /* swap endian */ false);
+  tinyusdz::usda::USDAReader reader(&sr);
+
+  // TODO: Uase AssetResolver
+  //reader.SetBaseDir(base_dir);
+
+  if (!reader.Read(load_state)) {
+    return false;
+  }
+
+  if (!reader.GetAsLayer(layer)) {
+    PUSH_ERROR_AND_RETURN("Failed to retrieve USD data as Layer: filepath = " << asset_name);
+  }
+
+  return false;
+}
+
+bool Stage::LoadLayerFromFile(const std::string &_filename, const LoadState load_state, Layer *layer) {
+  // TODO: Setup AssetResolver.
+
+  std::string filepath = io::ExpandFilePath(_filename, /* userdata */ nullptr);
+  std::string base_dir = io::GetBaseDir(_filename);
+
+  DCOUT("load layer from file: " << filepath);
+
+  std::string err;
+  std::vector<uint8_t> data;
+  size_t max_bytes = std::numeric_limits<size_t>::max(); // TODO:
+  if (!io::ReadWholeFile(&data, &err, filepath, max_bytes,
+                         /* userdata */ nullptr)) {
+    PUSH_ERROR_AND_RETURN("Read file failed: " + err);
+  }
+
+  return LoadLayerFromMemory(data.data(), data.size(), filepath, load_state, layer);
+}
+
+bool Stage::LoadSubLayers(std::vector<Layer> *sublayers) {
+  (void)sublayers;
+  return false;
+}
+
 namespace {
 
 void PrimPrintRec(std::stringstream &ss, const Prim &prim, uint32_t indent) {
@@ -302,8 +421,30 @@ void PrimPrintRec(std::stringstream &ss, const Prim &prim, uint32_t indent) {
   ss << pprint_value(prim.data(), indent, /* closing_brace */ false);
 
   DCOUT("num_children = " << prim.children().size());
-  for (const auto &child : prim.children()) {
-    PrimPrintRec(ss, child, indent + 1);
+
+  if (prim.metas().primChildren.size() == prim.children().size()) {
+    // Use primChildren info to determine the order of the traversal.
+
+    std::map<std::string, const Prim *> primNameTable;
+    for (size_t i = 0; i < prim.children().size(); i++) {
+      primNameTable.emplace(prim.children()[i].element_name(), &prim.children()[i]);
+    }
+
+    for (size_t i = 0; i < prim.metas().primChildren.size(); i++) {
+      value::token nameTok = prim.metas().primChildren[i];
+      DCOUT(fmt::format("primChildren  {}/{} = {}", i, prim.metas().primChildren.size(), nameTok.str()));
+      const auto it = primNameTable.find(nameTok.str());
+      if (it != primNameTable.end()) {
+        PrimPrintRec(ss, *(it->second), indent + 1);
+      } else {
+        // TODO: Report warning?
+      }
+    }
+
+  } else {
+    for (const auto &child : prim.children()) {
+      PrimPrintRec(ss, child, indent + 1);
+    }
   }
 
   ss << pprint::Indent(indent) << "}\n";
@@ -388,9 +529,125 @@ std::string Stage::ExportToString() const {
   ss << "\n";
 
   for (const auto &item : root_nodes) {
+    // TODO: Traverse according to StageMeta:primChildren
     PrimPrintRec(ss, item, 0);
   }
 
+  return ss.str();
+}
+
+bool Stage::allocate_prim_id(uint64_t *prim_id) const {
+  if (!prim_id) {
+    return false;
+  }
+
+  uint64_t val;
+  if (_prim_id_allocator.Allocate(&val)) {
+    (*prim_id) = val;
+    return true;
+  }
+
+  return false;
+}
+
+bool Stage::release_prim_id(const uint64_t prim_id) const {
+  return _prim_id_allocator.Release(prim_id);
+}
+
+bool Stage::has_prim_id(const uint64_t prim_id) const {
+  return _prim_id_allocator.Has(prim_id);
+}
+
+namespace {
+
+bool ComputeAbsPathAndAssignPrimIdRec(const Stage &stage, Prim &prim, const Path &parentPath, uint32_t depth, bool assign_prim_id, bool force_assign_prim_id = true) {
+  if (depth > 1024*1024*128) {
+    // too deep node.
+    return false;
+  }
+
+  // TODO: Check prim's element_name is not empty.
+
+  Path abs_path = parentPath.AppendPrim(prim.element_name());
+
+  prim.absolute_path() = abs_path;
+  if (assign_prim_id) {
+    if (force_assign_prim_id || (prim.prim_id() < 1)) {
+      uint64_t prim_id{0};
+      if (!stage.allocate_prim_id(&prim_id)) {
+        return false;
+      }
+      prim.prim_id() = int64_t(prim_id);
+    }
+  }
+
+  for (Prim &child : prim.children()) {
+    if (!ComputeAbsPathAndAssignPrimIdRec(stage, child, abs_path, depth+1, assign_prim_id, force_assign_prim_id)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+} // namespace local
+
+bool Stage::compute_absolute_prim_path_and_assign_prim_id(bool force_assign_prim_id) {
+
+  Path rootPath("/", "");
+  for (Prim &root : root_prims()) {
+    if (!ComputeAbsPathAndAssignPrimIdRec(*this, root, rootPath, 1, /* assign_prim_id */true, force_assign_prim_id)) {
+      return false;
+    }
+  }
+
+  // TODO: Only set dirty when prim_id changed.
+  _prim_id_dirty = true;
+
+  return true;
+}
+
+bool Stage::compute_absolute_prim_path() {
+
+  Path rootPath("/", "");
+  for (Prim &root : root_prims()) {
+    if (!ComputeAbsPathAndAssignPrimIdRec(*this, root, rootPath, 1, /* assign prim_id */false)) {
+      return false;
+    }
+  }
+
+  return true;
+
+}
+
+namespace {
+
+std::string DumpPrimTreeRec(const Prim &prim, uint32_t depth) {
+  std::stringstream ss;
+
+  if (depth > 1024*1024*128) {
+    // too deep node.
+    return ss.str();
+  }
+
+  ss << pprint::Indent(depth) << "\"" << prim.element_name() << "\" " << prim.absolute_path() << "\n";
+  ss << pprint::Indent(depth+1) << fmt::format("prim_id {}", prim.prim_id()) << "\n";
+
+  for (const Prim &child : prim.children()) {
+    ss << DumpPrimTreeRec(child, depth+1);
+  }
+
+  return ss.str();
+}
+
+} // namespace local
+
+std::string Stage::dump_prim_tree() const {
+  std::stringstream ss;
+
+  for (const Prim &root : root_prims()) {
+    ss << DumpPrimTreeRec(root, 0);
+  }
   return ss.str();
 }
 

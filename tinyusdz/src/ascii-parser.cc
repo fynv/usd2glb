@@ -146,7 +146,7 @@ extern template bool AsciiParser::ParseBasicTypeArray(std::vector<nonstd::option
 extern template bool AsciiParser::ParseBasicTypeArray(std::vector<nonstd::optional<value::matrix3d>> *result);
 extern template bool AsciiParser::ParseBasicTypeArray(std::vector<nonstd::optional<value::matrix4d>> *result);
 extern template bool AsciiParser::ParseBasicTypeArray(std::vector<nonstd::optional<value::token>> *result);
-extern template bool AsciiParser::ParseBasicTypeArray(std::vector<nonstd::optional<StringData>> *result);
+extern template bool AsciiParser::ParseBasicTypeArray(std::vector<nonstd::optional<value::StringData>> *result);
 extern template bool AsciiParser::ParseBasicTypeArray(std::vector<nonstd::optional<std::string>> *result);
 extern template bool AsciiParser::ParseBasicTypeArray(std::vector<nonstd::optional<Reference>> *result);
 extern template bool AsciiParser::ParseBasicTypeArray(std::vector<nonstd::optional<Path>> *result);
@@ -194,7 +194,7 @@ extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::matrix
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::matrix3d> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::matrix4d> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::token> *result);
-extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<StringData> *result);
+extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::StringData> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<std::string> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<Reference> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<Path> *result);
@@ -280,6 +280,10 @@ static void RegisterPrimMetas(
 
   // USDZ extension
   metas["sceneName"] = AsciiParser::VariableDef(value::kString, "sceneName");
+
+  // Omniverse extension
+  // Builtin from pxrUSD 23.xx?
+  metas["displayName"] = AsciiParser::VariableDef(value::kString, "displayName");
 }
 
 static void RegisterPropMetas(
@@ -731,15 +735,29 @@ bool AsciiParser::ParseDictElement(std::string *out_key,
       }
       var.set_value(val);
     }
+  } else if (type_name == value::kDouble) {
+    if (array_qual) {
+      std::vector<double> vss;
+      if (!ParseBasicTypeArray(&vss)) {
+        PUSH_ERROR_AND_RETURN("Failed to parse `double[]`");
+      }
+      var.set_value(vss);
+    } else {
+      double str;
+      if (!ReadBasicType(&str)) {
+        PUSH_ERROR_AND_RETURN("Failed to parse `double`");
+      }
+      var.set_value(str);
+    }
   } else if (type_name == value::kString) {
     if (array_qual) {
-      std::vector<StringData> strs;
+      std::vector<value::StringData> strs;
       if (!ParseBasicTypeArray(&strs)) {
         PUSH_ERROR_AND_RETURN("Failed to parse `string[]`");
       }
       var.set_value(strs);
     } else {
-      StringData str;
+      value::StringData str;
       if (!ReadBasicType(&str)) {
         PUSH_ERROR_AND_RETURN("Failed to parse `string`");
       }
@@ -1101,7 +1119,7 @@ bool AsciiParser::ReadStringLiteral(std::string *literal) {
   return true;
 }
 
-bool AsciiParser::MaybeString(StringData *str) {
+bool AsciiParser::MaybeString(value::StringData *str) {
   std::stringstream ss;
 
   if (!str) {
@@ -1175,7 +1193,7 @@ bool AsciiParser::MaybeString(StringData *str) {
   return true;
 }
 
-bool AsciiParser::MaybeTripleQuotedString(StringData *str) {
+bool AsciiParser::MaybeTripleQuotedString(value::StringData *str) {
   std::stringstream ss;
 
   auto loc = CurrLoc();
@@ -1530,7 +1548,7 @@ bool AsciiParser::ParseStageMetaOpt() {
   // Maybe string-only comment.
   // Comment cannot have multiple lines. The last one wins
   {
-    StringData str;
+    value::StringData str;
     if (MaybeTripleQuotedString(&str)) {
       _stage_metas.comment = str;
       return true;
@@ -1609,11 +1627,11 @@ bool AsciiParser::ParseStageMetaOpt() {
     }
   } else if ((varname == "doc") || (varname == "documentation")) {
     // `documentation` will be shorten to `doc`
-    if (auto pv = var.get_value<StringData>()) {
+    if (auto pv = var.get_value<value::StringData>()) {
       DCOUT("doc = " << to_string(pv.value()));
       _stage_metas.doc = pv.value();
     } else if (auto pvs = var.get_value<std::string>()) {
-      StringData sdata;
+      value::StringData sdata;
       sdata.value = pvs.value();
       sdata.is_triple_quoted = false;
       _stage_metas.doc = sdata;
@@ -1689,11 +1707,11 @@ bool AsciiParser::ParseStageMetaOpt() {
       PUSH_ERROR_AND_RETURN("`customLayerData` isn't a dictionary value.");
     }
   } else if (varname == "comment") {
-    if (auto pv = var.get_value<StringData>()) {
+    if (auto pv = var.get_value<value::StringData>()) {
       DCOUT("comment = " << to_string(pv.value()));
       _stage_metas.comment = pv.value();
     } else if (auto pvs = var.get_value<std::string>()) {
-      StringData sdata;
+      value::StringData sdata;
       sdata.value = pvs.value();
       sdata.is_triple_quoted = false;
       _stage_metas.comment = sdata;
@@ -2333,7 +2351,7 @@ bool AsciiParser::ParseMetaValue(const VariableDef &def, MetaVariable *outvar) {
 
     var.set_value(value);
   } else if (vartype == value::kString) {
-    StringData sdata;
+    value::StringData sdata;
     if (MaybeTripleQuotedString(&sdata)) {
       var.set_value(sdata);
     } else {
@@ -2821,7 +2839,7 @@ AsciiParser::ParsePrimMeta() {
   // reconstructed in ReconstructPrimMeta in usda-reader.cc later
   //
   {
-    StringData sdata;
+    value::StringData sdata;
     if (MaybeTripleQuotedString(&sdata)) {
       MetaVariable var;
       // empty name
@@ -2986,7 +3004,7 @@ bool AsciiParser::ParseAttrMeta(AttrMeta *out_meta) {
 
       // May be string only
       {
-        StringData sdata;
+        value::StringData sdata;
         if (MaybeTripleQuotedString(&sdata)) {
           out_meta->stringData.push_back(sdata);
 
@@ -3126,15 +3144,7 @@ bool AsciiParser::ParseRelationship(Relationship *result) {
     return false;
   }
 
-  if (c == '"') {
-    // string
-    std::string value;
-    if (!ReadBasicType(&value)) {
-      PUSH_ERROR_AND_RETURN("Failed to parse String.");
-    }
-    result->set(value);
-
-  } else if (c == '<') {
+  if (c == '<') {
     // Path
     Path value;
     if (!ReadBasicType(&value)) {
@@ -3150,7 +3160,7 @@ bool AsciiParser::ParseRelationship(Relationship *result) {
     result->set(value);
   } else {
     PUSH_ERROR_AND_RETURN("Unexpected char \"" + std::to_string(c) +
-                          "\" found. Expects string, Path or PathVector.");
+                          "\" found. Expects Path or PathVector.");
   }
 
   if (!SkipWhitespaceAndNewline()) {
@@ -3169,9 +3179,7 @@ bool AsciiParser::ParseBasicPrimAttr(bool array_qual,
   bool blocked{false};
 
   if (array_qual) {
-    if (value::TypeTraits<T>::type_name() == "bool") {
-      PushError("Array of bool type is not supported.");
-      return false;
+    if (MaybeNone()) {
     } else {
       std::vector<T> value;
       if (!ParseBasicTypeArray(&value)) {
@@ -3181,13 +3189,10 @@ bool AsciiParser::ParseBasicPrimAttr(bool array_qual,
         return false;
       }
 
-      if (value.size()) {
-        DCOUT("Got it: ty = " + std::string(value::TypeTraits<T>::type_name()) +
-              ", sz = " + std::to_string(value.size()));
-        var.set_value(value);
-      } else {
-        blocked = true;
-      }
+      // Empty array allowed.
+      DCOUT("Got it: ty = " + std::string(value::TypeTraits<T>::type_name()) +
+            ", sz = " + std::to_string(value.size()));
+      var.set_value(value);
     }
 
   } else if (hasConnect(primattr_name)) {
@@ -3228,7 +3233,15 @@ bool AsciiParser::ParseBasicPrimAttr(bool array_qual,
   attr.metas() = meta;
 
   if (blocked) {
+    // There is still have a type for ValueBlock.
+    value::ValueBlock noneval;
+    attr.set_value(noneval);
     attr.set_blocked(true);
+    if (array_qual) {
+      attr.set_type_name(value::TypeTraits<T>::type_name() + "[]");
+    } else {
+      attr.set_type_name(value::TypeTraits<T>::type_name());
+    }
   } else {
     attr.set_var(std::move(var));
   }
@@ -3238,7 +3251,7 @@ bool AsciiParser::ParseBasicPrimAttr(bool array_qual,
   return true;
 }
 
-bool AsciiParser::ParsePrimProps(std::map<std::string, Property> *props) {
+bool AsciiParser::ParsePrimProps(std::map<std::string, Property> *props, std::vector<value::token> *propNames) {
   // prim_prop : (custom?) uniform type (array_qual?) name '=' value
   //           | (custom?) type (array_qual?) name '=' value interpolation?
   //           | (custom?) uniform type (array_qual?) name interpolation?
@@ -3621,7 +3634,7 @@ bool AsciiParser::ParsePrimProps(std::map<std::string, Property> *props) {
         return false;
       }
     } else if (type_name == value::kString) {
-      if (!ParseBasicPrimAttr<StringData>(array_qual, primattr_name, &attr)) {
+      if (!ParseBasicPrimAttr<value::StringData>(array_qual, primattr_name, &attr)) {
         return false;
       }
     } else if (type_name == value::kToken) {
@@ -3789,7 +3802,8 @@ bool AsciiParser::ParsePrimProps(std::map<std::string, Property> *props) {
   }
 }
 
-bool AsciiParser::ParseProperty(std::map<std::string, Property> *props) {
+// propNames stores list of property name in its appearance order.
+bool AsciiParser::ParseProperties(std::map<std::string, Property> *props, std::vector<value::token> *propNames) {
   // property : primm_attr
   //          | 'rel' name '=' path
   //          ;
@@ -3815,7 +3829,7 @@ bool AsciiParser::ParseProperty(std::map<std::string, Property> *props) {
   }
 
   // attribute
-  return ParsePrimProps(props);
+  return ParsePrimProps(props, propNames);
 }
 
 std::string AsciiParser::GetCurrentPath() {
@@ -3986,7 +4000,7 @@ bool AsciiParser::ParseVariantSet(const int64_t primIdx,
 
       } else {
         DCOUT("Enter ParsePrimProps.");
-        if (!ParsePrimProps(&variantContent.props)) {
+        if (!ParsePrimProps(&variantContent.props, &variantContent.properties)) {
           PUSH_ERROR_AND_RETURN("Failed to parse Prim attribute.");
         }
         DCOUT(fmt::format("Done parse ParsePrimProps."));
@@ -4155,6 +4169,7 @@ bool AsciiParser::ParseBlock(const Specifier spec, const int64_t primIdx,
   }
 
   std::map<std::string, Property> props;
+  std::vector<value::token> propNames;
 
   {
     std::string full_path = GetCurrentPath();
@@ -4261,7 +4276,7 @@ bool AsciiParser::ParseBlock(const Specifier spec, const int64_t primIdx,
       } else {
         DCOUT("Enter ParsePrimProps.");
         // Assume PrimAttr
-        if (!ParsePrimProps(&props)) {
+        if (!ParsePrimProps(&props, &propNames)) {
           PUSH_ERROR_AND_RETURN("Failed to parse Prim attribute.");
         }
       }
@@ -4274,29 +4289,49 @@ bool AsciiParser::ParseBlock(const Specifier spec, const int64_t primIdx,
 
   std::string pTy = prim_type;
 
-  if (prim_type.empty()) {
-    // No Prim type specified. Treat it as Model
+  if (IsToplevel()) {
 
-    pTy = "Model";
-  }
+    if (prim_type.empty()) {
+      // No Prim type specified. Treat it as Model
 
-  if (_prim_construct_fun_map.count(pTy)) {
-    auto construct_fun = _prim_construct_fun_map[pTy];
+      pTy = "Model";
+    }
 
-    Path fullpath(GetCurrentPath(), "");
-    Path pname(prim_name, "");
-    nonstd::expected<bool, std::string> ret = construct_fun(
-        fullpath, spec, pname, primIdx, parentPrimIdx, props, in_metas);
+    if (_prim_construct_fun_map.count(pTy)) {
+      auto construct_fun = _prim_construct_fun_map[pTy];
 
-    if (!ret) {
-      // construction failed.
-      PUSH_ERROR_AND_RETURN("Constructing Prim type `" + pTy +
-                            "` failed: " + ret.error());
+      Path fullpath(GetCurrentPath(), "");
+      Path pname(prim_name, "");
+      nonstd::expected<bool, std::string> ret = construct_fun(
+          fullpath, spec, pname, primIdx, parentPrimIdx, props, in_metas);
+
+      if (!ret) {
+        // construction failed.
+        PUSH_ERROR_AND_RETURN("Constructing Prim type `" + pTy +
+                              "` failed: " + ret.error());
+      }
+    } else {
+      PUSH_WARN(fmt::format(
+          "TODO: Unsupported/Unimplemented Prim type: `{}`. Skipping parsing.",
+          pTy));
     }
   } else {
-    PUSH_WARN(fmt::format(
-        "TODO: Unsupported/Unimplemented Prim type: `{}`. Skipping parsing.",
-        pTy));
+    // Load scene as PrimSpec tree
+    if (_primspec_fun) {
+      Path fullpath(GetCurrentPath(), "");
+      Path pname(prim_name, "");
+
+      // pass prim_type as is(empty = empty string)
+      nonstd::expected<bool, std::string> ret = _primspec_fun(
+          fullpath, spec, prim_type, pname, primIdx, parentPrimIdx, props, in_metas);
+
+      if (!ret) {
+        // construction failed.
+        PUSH_ERROR_AND_RETURN(fmt::format("Constructing PrimSpec typeName `{}`, elementName `{}` failed: {}", prim_type, prim_name, ret.error()));
+      }
+    } else {
+      PUSH_ERROR_AND_RETURN_TAG(kAscii, "[Internal Error] PrimSpec handler is not found.");
+    }
   }
 
   PopPath();
@@ -4306,12 +4341,12 @@ bool AsciiParser::ParseBlock(const Specifier spec, const int64_t primIdx,
 
 ///
 /// Parser entry point
-/// TODO: Refactor
+/// TODO: Refactor and use unified code path regardless of LoadState.
 ///
 bool AsciiParser::Parse(LoadState state) {
-  _sub_layered = (state == LoadState::SUBLAYER);
-  _referenced = (state == LoadState::REFERENCE);
-  _payloaded = (state == LoadState::PAYLOAD);
+  _sub_layered = (state == LoadState::Sublayer);
+  _referenced = (state == LoadState::Reference);
+  _payloaded = (state == LoadState::Payload);
 
   bool header_ok = ParseMagicHeader();
   if (!header_ok) {
@@ -4334,13 +4369,14 @@ bool AsciiParser::Parse(LoadState state) {
 
     if (c == '(') {
       // stage meta.
+      // TODO: We could skip parsing stage meta in flatten(composition) mode.
       if (!ParseStageMetas()) {
         PUSH_ERROR_AND_RETURN("Failed to parse Stage metas.");
       }
     }
   }
 
-  if (_stage_meta_process_fun) {
+  if (IsToplevel() && _stage_meta_process_fun) {
     DCOUT("StageMeta callback.");
     bool ret = _stage_meta_process_fun(_stage_metas);
     if (!ret) {

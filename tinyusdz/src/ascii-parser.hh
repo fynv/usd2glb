@@ -5,11 +5,13 @@
 
 #pragma once
 
-#include <cerrno>
-#include <functional>
+//#include <functional>
+#include <stdio.h>
+
 #include <stack>
 
 //#include "external/better-enums/enum.h"
+#include "composition.hh"
 #include "prim-types.hh"
 #include "stream-reader.hh"
 #include "tinyusdz.hh"
@@ -49,38 +51,6 @@ struct PathIdentifier : std::string {
   // using std::string;
 };
 
-enum class LoadState {
-  TOPLEVEL,   // toplevel .usda input
-  SUBLAYER,   // .usda is read by 'subLayers'
-  REFERENCE,  // .usda is read by `references`
-  PAYLOAD,    // .usda is read by `payload`
-};
-
-// Prim Kind
-// https://graphics.pixar.com/usd/release/glossary.html#usdglossary-kind
-#if 1
-enum class Kind {
-  Model,         // "model"
-  Group,         // "group"
-  Assembly,      // "assembly"
-  Component,     // "component"
-  Subcomponent,  // "subcomponent"
-};
-#else
-
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Weverything"
-#endif
-
-BETTER_ENUM(Kind, int, model, group, assembly, component, subcomponent);
-
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-
-#endif
-
 ///
 /// Test if input file is USDA ascii format.
 ///
@@ -93,8 +63,9 @@ class AsciiParser {
     // Frequently used prim metas
     nonstd::optional<Kind> kind;
 
-    value::dict customData;           // `customData`
-    std::vector<StringData> strings;  // String only unregistered metadata.
+    value::dict customData;  // `customData`
+    std::vector<value::StringData>
+        strings;  // String only unregistered metadata.
   };
 
   // TODO: Unifity class with StageMetas in prim-types.hh
@@ -104,7 +75,7 @@ class AsciiParser {
     ///
     std::vector<value::AssetPath> subLayers;  // 'subLayers'
     value::token defaultPrim;                 // 'defaultPrim'
-    StringData doc;                           // 'doc' or 'documentation'
+    value::StringData doc;                    // 'doc' or 'documentation'
     nonstd::optional<Axis> upAxis;            // not specified = nullopt
     nonstd::optional<double> metersPerUnit;
     nonstd::optional<double> timeCodesPerSecond;
@@ -116,7 +87,7 @@ class AsciiParser {
     nonstd::optional<value::token> playbackMode;  // 'none' or 'loop'
 
     std::map<std::string, MetaVariable> customLayerData;  // `customLayerData`.
-    StringData comment;  // String only comment string.
+    value::StringData comment;  // String only comment string.
   };
 
   struct ParseState {
@@ -212,11 +183,6 @@ class AsciiParser {
   ~AsciiParser();
 
   ///
-  /// Callback functions which is called from a class outside of
-  /// AsciiParser(i.e. USDAReader)
-  ///
-
-  ///
   /// Assign index to primitive for index-based prim scene graph representation.
   /// -1 = root
   ///
@@ -266,6 +232,7 @@ class AsciiParser {
     PrimMetaMap metas;
     std::vector<int64_t> primIndices;  // primIdx of Reconstrcuted Prim.
     std::map<std::string, Property> props;
+    std::vector<value::token> properties;
   };
 
   ///
@@ -290,6 +257,18 @@ class AsciiParser {
   }
 
   ///
+  /// For composition(Treat Prim as generic container).
+  /// AsciiParser(i.e. USDAReader)
+  ///
+  using PrimSpecFunction = std::function<nonstd::expected<bool, std::string>(
+      const Path &full_path, const Specifier spec, const std::string &primTypeName,
+      const Path &prim_name, const int64_t primIdx, const int64_t parentPrimIdx,
+      const std::map<std::string, Property> &properties,
+      const PrimMetaMap &in_meta)>;
+
+  void RegisterPrimSpecFunction(PrimSpecFunction fun) { _primspec_fun = fun; }
+
+  ///
   /// Base filesystem directory to search asset files.
   ///
   void SetBaseDir(const std::string &base_dir);
@@ -307,30 +286,35 @@ class AsciiParser {
   ///
   /// Parser entry point
   ///
-  bool Parse(LoadState state = LoadState::TOPLEVEL);
-
+  bool Parse(LoadState state = LoadState::Toplevel);
 
   ///
-  /// Parse TimeSample value with specified array type of `type_id`(value::TypeId)
-  /// (You can obrain type_id from string using value::GetTypeId())
+  /// Parse TimeSample value with specified array type of
+  /// `type_id`(value::TypeId) (You can obrain type_id from string using
+  /// value::GetTypeId())
   ///
   bool ParseTimeSampleValue(const uint32_t type_id, value::Value *result);
 
   ///
-  /// Parse TimeSample value with specified `type_name`(Appears in USDA. .e.g. "float", "matrix2d")
+  /// Parse TimeSample value with specified `type_name`(Appears in USDA. .e.g.
+  /// "float", "matrix2d")
   ///
   bool ParseTimeSampleValue(const std::string &type_name, value::Value *result);
 
   ///
-  /// Parse TimeSample value with specified base type of `type_id`(value::TypeId)
-  /// (You can obrain type_id from string using value::GetTypeId())
+  /// Parse TimeSample value with specified base type of
+  /// `type_id`(value::TypeId) (You can obrain type_id from string using
+  /// value::GetTypeId())
   ///
-  bool ParseTimeSampleValueOfArrayType(const uint32_t base_type_id, value::Value *result);
+  bool ParseTimeSampleValueOfArrayType(const uint32_t base_type_id,
+                                       value::Value *result);
 
   ///
-  /// Parse TimeSample value with specified array type of `type_name`("[]" omiotted. .e.g. "float" for "float[]")
+  /// Parse TimeSample value with specified array type of `type_name`("[]"
+  /// omiotted. .e.g. "float" for "float[]")
   ///
-  bool ParseTimeSampleValueOfArrayType(const std::string &type_name, value::Value *result);
+  bool ParseTimeSampleValueOfArrayType(const std::string &type_name,
+                                       value::Value *result);
 
   // TODO: ParseBasicType?
   bool ParsePurpose(Purpose *result);
@@ -391,7 +375,7 @@ class AsciiParser {
   bool ReadBasicType(nonstd::optional<value::texcoord3h> *value);
   bool ReadBasicType(nonstd::optional<value::texcoord3f> *value);
   bool ReadBasicType(nonstd::optional<value::texcoord3d> *value);
-  bool ReadBasicType(nonstd::optional<StringData> *value);
+  bool ReadBasicType(nonstd::optional<value::StringData> *value);
   bool ReadBasicType(nonstd::optional<std::string> *value);
   bool ReadBasicType(nonstd::optional<value::token> *value);
   bool ReadBasicType(nonstd::optional<Path> *value);
@@ -453,7 +437,7 @@ class AsciiParser {
   bool ReadBasicType(value::matrix2d *value);
   bool ReadBasicType(value::matrix3d *value);
   bool ReadBasicType(value::matrix4d *value);
-  bool ReadBasicType(StringData *value);
+  bool ReadBasicType(value::StringData *value);
   bool ReadBasicType(std::string *value);
   bool ReadBasicType(value::token *value);
   bool ReadBasicType(Path *value);
@@ -575,12 +559,12 @@ class AsciiParser {
   ///
   /// Try parsing single-quoted(`"`) string
   ///
-  bool MaybeString(StringData *str);
+  bool MaybeString(value::StringData *str);
 
   ///
   /// Try parsing triple-quited(`"""`) multi-line string.
   ///
-  bool MaybeTripleQuotedString(StringData *str);
+  bool MaybeTripleQuotedString(value::StringData *str);
 
   ///
   /// Parse assset path identifier.
@@ -684,7 +668,7 @@ class AsciiParser {
   bool Eof() { return _sr->eof(); }
 
   bool ParseRelationship(Relationship *result);
-  bool ParseProperty(std::map<std::string, Property> *props);
+  bool ParseProperties(std::map<std::string, Property> *props, std::vector<value::token> *propNames);
 
   //
   // Look***() : Fetch chars but do not change input stream position.
@@ -735,40 +719,9 @@ class AsciiParser {
   ///
   void Setup();
 
-  // template<typename T>
-  // bool ParseTimeSampleData(nonstd::optional<T> *out_value);
-
-  // -- [TimeSamples] -------------------
-
-  //template <typename T>
-  //using TimeSampleData = std::vector<std::pair<double, nonstd::optional<T>>>;
-
-  // template <typename T>
-  // using TimeSampleDataArray = std::vector<std::pair<double,
-  // nonstd::optional<std::vector<T>>>>;
-
-  ///
-  /// Convert TimeSampleData<T> to TimeSamples(type-erased TimeSample Sdata
-  /// struct)
-  ///
-  //template <typename T>
-  //value::TimeSamples ConvertToTimeSamples(const TimeSampleData<T> &in);
-
-  //template <typename T>
-  //value::TimeSamples ConvertToTimeSamples(
-  //    const TimeSampleData<std::vector<T>> &in);
-
-  //// T = scalar(e.g. `float`)
-  //template <typename T>
-  //nonstd::optional<TimeSampleData<T>> TryParseTimeSamples();
-
-  //template <typename T>
-  //nonstd::optional<TimeSampleData<std::vector<T>>> TryParseTimeSamplesOfArray();
-
-  // ---------------------------------------
 
   nonstd::optional<std::pair<ListEditQual, MetaVariable>> ParsePrimMeta();
-  bool ParsePrimProps(std::map<std::string, Property> *props);
+  bool ParsePrimProps(std::map<std::string, Property> *props, std::vector<value::token> *propNames);
 
   template <typename T>
   bool ParseBasicPrimAttr(bool array_qual, const std::string &primattr_name,
@@ -794,16 +747,6 @@ class AsciiParser {
   // "class" defs
   // std::map<std::string, Klass> _klasses;
   std::stack<std::string> _path_stack;
-
-#if 0
-  // Cache of loaded `references`
-  // <filename, {defaultPrim index, list of root nodes in referenced usd file}>
-  std::map<std::string, std::pair<uint32_t, std::vector<GPrim>>>
-        _reference_cache;
-
-    // toplevel "def" defs
-    std::vector<GPrim> _gprims;
-#endif
 
   Cursor _curr_cursor;
 
@@ -847,8 +790,8 @@ class AsciiParser {
   std::map<std::string, PrimConstructFunction> _prim_construct_fun_map;
   std::map<std::string, PostPrimConstructFunction> _post_prim_construct_fun_map;
 
-  // class Impl;
-  // Impl *_impl;
+  // For composition. PrimSpec is typeless so single callback function only.
+  PrimSpecFunction _primspec_fun{nullptr};
 };
 
 }  // namespace ascii

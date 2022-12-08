@@ -59,6 +59,12 @@ namespace Mid
 	};
 }
 
+inline glm::mat4 mat_convert(const tinyusdz::value::matrix4d& mat)
+{
+	glm::mat4 mat_row = *(glm::dmat4*)(&mat);
+	return glm::transpose(mat_row);
+}
+
 #if 1
 int main(int argc, char* argv[])
 {
@@ -414,14 +420,12 @@ int main(int argc, char* argv[])
 		if (prim.prim->data().type_id() == tinyusdz::value::TYPE_ID_GEOM_XFORM)
 		{
 			auto* node_in = prim.prim->data().as<tinyusdz::Xform>();			
-
-			{			
-				auto iter = node_in->props.find("material:binding");
-				if (iter != node_in->props.end())
-				{
-					prim.idx_material = material_map[iter->second.get_relationship().targetPath.full_path_name()];
-				}
+			if (node_in->materialBinding.has_value())
+			{
+				std::string material_path = node_in->materialBinding.value().targetPath.full_path_name();				
+				prim.idx_material = material_map[material_path];				
 			}
+
 
 			int node_id = (int)m_out.nodes.size();
 
@@ -429,9 +433,9 @@ int main(int argc, char* argv[])
 			node_out.name = node_in->name;
 
 			tinyusdz::value::matrix4d matrix;
-			node_in->EvaluateXformOps(&matrix, nullptr, nullptr);
+			node_in->EvaluateXformOps(0.0, tinyusdz::value::TimeSampleInterpolationType::Linear, &matrix, nullptr, nullptr);
 
-			glm::mat4 mat = *(glm::dmat4*)(&matrix);
+			glm::mat4 mat = mat_convert(matrix);
 			glm::vec3 scale;
 			glm::quat rotation;
 			glm::vec3 translation;
@@ -480,7 +484,7 @@ int main(int argc, char* argv[])
 				{
 					auto* matrix = op.get_scalar().value().as<tinyusdz::value::matrix4d>();
 
-					glm::mat4 mat = *(glm::dmat4*)(matrix);
+					glm::mat4 mat = mat_convert(*matrix);
 					glm::vec3 scale;
 					glm::quat rotation;
 					glm::vec3 translation;
@@ -508,17 +512,15 @@ int main(int argc, char* argv[])
 			auto* mesh_in = prim.prim->data().as<tinyusdz::GeomMesh>();
 
 			bool leftHand = false;
+			if (mesh_in->orientation.get_value() == tinyusdz::Orientation::LeftHanded)
 			{
-				auto iter = mesh_in->props.find("orientation");
-				if (iter != mesh_in->props.end())
-				{
-					leftHand = iter->second.get_attribute().get_value<tinyusdz::Token>().value().str() == "leftHanded";
-				}
+				leftHand = true;				
 			}						
 
 			if (mesh_in->materialBinding.has_value())
 			{
-				prim.idx_material = material_map[mesh_in->materialBinding.value().binding.full_path_name()];
+				std::string material_path = mesh_in->materialBinding.value().targetPath.full_path_name();
+				prim.idx_material = material_map[material_path];
 			}
 
 			int node_id = (int)m_out.nodes.size();
@@ -636,7 +638,7 @@ int main(int argc, char* argv[])
 				{
 					if (mesh_in->skeleton.has_value())
 					{
-						prim.skel_path = mesh_in->skeleton.value().full_path_name();
+						prim.skel_path = mesh_in->skeleton.value().targetPath.full_path_name();
 					}
 					node_skin_map[node_id] = prim.skel_path;
 

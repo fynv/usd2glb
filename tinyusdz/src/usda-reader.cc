@@ -3,7 +3,7 @@
 //
 // USDA reader
 // TODO:
-//   - [ ] `over` and `class` block
+//   - [ ] Refactor and unify Prim and PrimSpec related code.
 
 #include <algorithm>
 #include <atomic>
@@ -117,11 +117,19 @@ constexpr auto kTag = "[USDA]";
 namespace {
 
 struct PrimNode {
-  value::Value prim;
+  value::Value prim; // stores typed Prim value. Xform, GeomMesh, ...
   std::string elementName;
 
   int64_t parent{-1};            // -1 = root node
   std::vector<size_t> children;  // index to USDAReader._prims[]
+};
+
+// For USD scene read for composition(read by references, subLayers, payloads)
+struct PrimSpecNode {
+  PrimSpec primSpec;
+
+  int64_t parent{-1};            // -1 = root node
+  std::vector<size_t> children;  // index to USDAReader._primspecs[]
 };
 
 // TODO: Move to prim-types.hh?
@@ -171,12 +179,6 @@ DEFINE_PRIM_TYPE(Scope, "Scope", value::TYPE_ID_SCOPE);
 
 DEFINE_PRIM_TYPE(GPrim, "GPrim", value::TYPE_ID_GPRIM);
 
-// DEFINE_PRIM_TYPE(PreviewSurface, "PreviewSurface",
-// value::TYPE_ID_IMAGING_PREVIEWSURFACE); DEFINE_PRIM_TYPE(UVTexture,
-// "UVTexture", value::TYPE_ID_IMAGING_UVTEXTURE);
-// DEFINE_PRIM_TYPE(PrimvarReader_float2, "PrimvarReaderUVTexture",
-// value::TYPE_ID_IMAGING_UVTEXTURE);
-
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
@@ -201,55 +203,6 @@ class VariableDef {
     return *this;
   }
 };
-
-namespace {
-
-#if 0
-// Extract array of References from Variable.
-ReferenceList GetReferences(
-    const std::tuple<ListEditQual, value::any_value> &_var) {
-  ReferenceList result;
-
-  ListEditQual qual = std::get<0>(_var);
-
-  auto var = std::get<1>(_var);
-
-  SDCOUT << "GetReferences. var.name = " << var.name << "\n";
-
-  if (var.IsArray()) {
-    DCOUT("IsArray");
-    auto parr = var.as_array();
-    if (parr) {
-      DCOUT("parr");
-      for (const auto &v : parr->values) {
-        DCOUT("Maybe Value");
-        if (v.IsValue()) {
-          DCOUT("Maybe Reference");
-          if (auto pref = nonstd::get_if<Reference>(v.as_value())) {
-            DCOUT("Got it");
-            result.push_back({qual, *pref});
-          }
-        }
-      }
-    }
-  } else if (var.IsValue()) {
-    DCOUT("IsValue");
-    if (auto pv = var.as_value()) {
-      DCOUT("Maybe Reference");
-      if (auto pas = nonstd::get_if<Reference>(pv)) {
-        DCOUT("Got it");
-        result.push_back({qual, *pas});
-      }
-    }
-  } else {
-    DCOUT("Unknown var type: " + Variable::type_name(var));
-  }
-
-  return result;
-}
-#endif
-
-}  // namespace
 
 inline bool hasConnect(const std::string &str) {
   return endsWith(str, ".connect");
@@ -565,14 +518,86 @@ class USDAReader::Impl {
     return true;
   }
 
+  void RegisterPrimSpecHandler() {
+    _parser.RegisterPrimSpecFunction(
+         [&](const Path &full_path, const Specifier spec, const std::string &typeName, const Path &prim_name, const int64_t primIdx,
+            const int64_t parentPrimIdx,
+            const prim::PropertyMap &properties,
+            const ascii::AsciiParser::PrimMetaMap &in_meta) 
+            -> nonstd::expected<bool, std::string> {
+
+          if (!prim_name.is_valid()) {
+            return nonstd::make_unexpected("Invalid Prim name: " +
+                                           prim_name.full_path_name());
+          }
+          if (prim_name.is_absolute_path() || prim_name.is_root_path()) {
+            return nonstd::make_unexpected(
+                "Prim name should not starts with '/' or contain `/`: Prim "
+                "name = " +
+                prim_name.full_path_name());
+          }
+
+          if (!prim_name.prop_part().empty()) {
+            return nonstd::make_unexpected(
+                "Prim path should not contain property part(`.`): Prim name "
+                "= " +
+                prim_name.full_path_name());
+          }
+
+          if (primIdx < 0) {
+            return nonstd::make_unexpected(
+                "Unexpected primIdx value. primIdx must be positive.");
+          }
+
+          if (prim_name.prim_part().empty()) {
+            return nonstd::make_unexpected("Prim's name should not be empty ");
+          }
+
+          PrimSpec primspec;
+          primspec.name() = prim_name.prim_part();
+          primspec.specifier() = spec;
+          primspec.typeName() = typeName;
+
+          DCOUT("primspec name, primType = " << prim_name.prim_part() << ", " << typeName);
+
+          // Assign index for PrimSpec
+          // TODO: Use sample id table(= _prim_nodes)
+
+          if (size_t(primIdx) >= _primspec_nodes.size()) {
+            _primspec_nodes.resize(size_t(primIdx) + 1);
+          }
+          DCOUT("sz " << std::to_string(_primspec_nodes.size())
+                      << ", primIdx = " << primIdx);
+
+          _primspec_nodes[size_t(primIdx)].primSpec = std::move(primspec);
+          DCOUT("primspec[" << primIdx << "].ty = "
+                        << _primspec_nodes[size_t(primIdx)].primSpec.typeName());
+          _primspec_nodes[size_t(primIdx)].parent = parentPrimIdx;
+
+          if (parentPrimIdx == -1) {
+            _toplevel_primspecs.push_back(size_t(primIdx));
+          } else {
+            _primspec_nodes[size_t(parentPrimIdx)].children.push_back(
+                size_t(primIdx));
+            return true;
+          }
+
+          return true;
+      }
+    );
+
+  }
+
   void ImportScene(tinyusdz::Stage &scene) { _imported_scene = scene; }
 
+#if 0
   bool HasPath(const std::string &path) {
     Path p(path, "");
     TokenizedPath tokPath(p);
     (void)tokPath;
     PUSH_ERROR_AND_RETURN("TODO: HasPath()");
   }
+#endif
 
   void StageMetaProcessor() {
     _parser.RegisterStageMetaProcessFunction(
@@ -682,7 +707,7 @@ class USDAReader::Impl {
         // TODO: duplicated key check?
         if (auto pv = item.second.get_value<std::string>()) {
           m[item.first] = pv.value();
-        } else if (auto pvs = item.second.get_value<StringData>()) {
+        } else if (auto pvs = item.second.get_value<value::StringData>()) {
           // TODO: store triple-quote info
           m[item.first] = pvs.value().value;
         } else {
@@ -744,6 +769,20 @@ class USDAReader::Impl {
               "(Internal error?) `sceneName` metadataum is not type `string`. got `"
               << var.type_name() << "`.");
         }
+      } else if (meta.first == "displayName") {
+        DCOUT("displayName. type = " << var.type_name());
+        if (var.type_name() == value::kString) {
+          if (auto pv = var.get_value<std::string>()) {
+            out->displayName = pv.value();
+          } else {
+            PUSH_ERROR_AND_RETURN(
+                "(Internal error?) `displayName` metadataum is not type `string`.");
+          }
+        } else {
+          PUSH_ERROR_AND_RETURN(
+              "(Internal error?) `displayName` metadataum is not type `string`. got `"
+              << var.type_name() << "`.");
+        }
       } else if (meta.first == "kind") {
         // std::tuple<ListEditQual, MetaVariable>
         // TODO: list-edit qual
@@ -779,7 +818,7 @@ class USDAReader::Impl {
         }
       } else if (meta.first == "customData") {
         DCOUT("customData. type = " << var.type_name());
-        if (var.type_id() == value::TypeTraits<CustomDataType>::type_id) {
+        if (var.type_id() == value::TypeTraits<CustomDataType>::type_id()) {
           if (auto pv = var.get_value<CustomDataType>()) {
             out->customData = pv.value();
           } else {
@@ -854,7 +893,7 @@ class USDAReader::Impl {
         // treat as `string`
         if (auto pvb = var.get_value<value::ValueBlock>()) {
           out->variantSets = std::make_pair(listEditQual, std::vector<std::string>());
-        } else if (auto pv = var.get_value<StringData>()) {
+        } else if (auto pv = var.get_value<value::StringData>()) {
           std::vector<std::string> vs;
           vs.push_back(pv.value().value);
           out->variantSets = std::make_pair(listEditQual, vs);
@@ -954,7 +993,7 @@ class USDAReader::Impl {
         }
       } else {
         // string-only data?
-        if (auto pv = var.get_value<StringData>()) {
+        if (auto pv = var.get_value<value::StringData>()) {
           out->stringData.push_back(pv.value());
         } else {
           PUSH_WARN("TODO: Prim metadataum : " << meta.first);
@@ -970,7 +1009,7 @@ class USDAReader::Impl {
   /// TODO: Use callback function(visitor) so that Reconstruct**** function is
   /// invoked in the Parser context.
   ///
-  bool Read(ascii::LoadState state = ascii::LoadState::TOPLEVEL);
+  bool Read(LoadState state = LoadState::Toplevel);
 
   // std::vector<GPrim> GetGPrims() { return _gprims; }
 
@@ -981,14 +1020,20 @@ class USDAReader::Impl {
   std::string GetWarning() { return _warn; }
 
   ///
-  /// Valid after `ReconstructStage`.
+  /// Valid after `Read`.
   ///
-  const Stage &GetStage() const { return _stage; }
+  bool GetAsLayer(Layer *layer);
 
   ///
   /// Valid after `Read`.
   ///
   bool ReconstructStage();
+
+  ///
+  /// Valid after `ReconstructStage`.
+  ///
+  const Stage &GetStage() const { return _stage; }
+
 
  private:
   //bool stage_reconstructed_{false};
@@ -1053,8 +1098,8 @@ class USDAReader::Impl {
   std::string _warn;
 
   // Cache of loaded `references`
-  // <filename, {defaultPrim index, list of root nodes in referenced usd file}>
-  std::map<std::string, std::pair<uint32_t, std::vector<GPrim>>>
+  // <filename, {defaultPrim index, Layer(PrimSpec data of usd file)}>
+  std::map<std::string, std::pair<uint32_t, Layer>>
       _reference_cache;
 
   // toplevel prims
@@ -1065,6 +1110,17 @@ class USDAReader::Impl {
 
   // Path(prim part only) -> index to _prim_nodes[]
   std::map<std::string, size_t> _primpath_to_prim_idx_map;
+
+
+  // toplevel primspecs
+  std::vector<size_t> _toplevel_primspecs;  // index to _prim_nodes
+
+  // Flattened array of primspec nodes.
+  std::vector<PrimSpecNode> _primspec_nodes;
+  // Path(prim part only) -> index to _primspec_nodes[]
+  std::map<std::string, size_t> _primpath_to_primspec_idx_map;
+  bool _primspec_invalidated{true};
+
 
   // load flags
   bool _sub_layered{false};
@@ -1077,6 +1133,69 @@ class USDAReader::Impl {
 
 };  // namespace usda
 
+namespace {
+
+// bottom up conversion.
+bool ToPrimSpecRec(PrimSpecNode &node,
+                        std::vector<PrimSpecNode> &primspec_nodes, PrimSpec &parent) {
+
+  for (const auto &cidx : node.children) {
+    if (cidx >= primspec_nodes.size()) {
+      return false;
+    }
+
+    PrimSpecNode &child = primspec_nodes[cidx];
+    if (!ToPrimSpecRec(child, primspec_nodes, parent)) {
+      return false;
+    }
+  }
+
+  parent.children().emplace_back(std::move(node.primSpec)); 
+
+  return true;
+}
+
+}  // namespace
+
+bool USDAReader::Impl::GetAsLayer(Layer *layer) {
+
+  if (!layer) {
+    PUSH_ERROR_AND_RETURN("layer arg is nullptr.");
+  }
+
+  if (_primspec_invalidated) {
+    PUSH_ERROR_AND_RETURN("PrimSpec data is invalid. USD data is not loaded or there was an error in earlier GetAsLayer call, or GetAsLayer invoked multiple times.");
+  }
+
+  layer->prim_specs.clear();
+  
+  for (const auto &idx : _toplevel_primspecs) {
+    DCOUT("Toplevel primspec idx: " << std::to_string(idx));
+
+    if (idx >= _primspec_nodes.size()) {
+      PUSH_ERROR_AND_RETURN("[Internal Error] out-of-bounds access.");
+    }
+
+    auto &node = _primspec_nodes[idx];
+    PrimSpec &primSpec = node.primSpec;
+
+    DCOUT("primspec[" << idx << "].typeName = " << primSpec.typeName());
+    DCOUT("primspec[" << idx << "].name = " << primSpec.name());
+    DCOUT("root prim[" << idx << "].num_children = " << primSpec.children().size());
+    
+    if (!ToPrimSpecRec(node, _primspec_nodes, /* inout */primSpec)) {
+      _primspec_invalidated = true;
+      PUSH_ERROR_AND_RETURN("Construct PrimSpec tree failed.");
+    }
+
+    layer->prim_specs.emplace_back(_primspec_nodes[idx].primSpec);
+  }
+
+  // NOTE: _toplevel_primspecs are destroyed(std::move'ed)
+  _primspec_invalidated = true;
+
+  return true;
+}
 
 ///
 /// -- Impl reconstruct
@@ -1090,6 +1209,7 @@ void ReconstructNodeRec(const size_t idx,
 
   Prim prim(node.prim);
   DCOUT("prim[" << idx << "].type = " << node.prim.type_name());
+  //prim.prim_id() = int64_t(idx);
 
   for (const auto &cidx : node.children) {
     ReconstructNodeRec(cidx, prim_nodes, prim);
@@ -1112,6 +1232,7 @@ bool USDAReader::Impl::ReconstructStage() {
 
     Prim prim(node.prim);
     DCOUT("prim[" << idx << "].type = " << node.prim.type_name());
+    //prim.prim_id() = int64_t(idx);
 
     for (const auto &cidx : node.children) {
 #if 0
@@ -1131,6 +1252,9 @@ bool USDAReader::Impl::ReconstructStage() {
 
     DCOUT("num_children = " << _stage.root_prims()[size_t(_stage.root_prims().size() - 1)].children().size());
   }
+
+  // Compute Abs Path from built Prim tree and Assign prim id.
+  _stage.compute_absolute_prim_path_and_assign_prim_id();
 
   return true;
 }
@@ -1504,7 +1628,7 @@ bool USDAReader::Impl::ReconstructPrim(
 /// -- Impl Read
 ///
 
-bool USDAReader::Impl::Read(ascii::LoadState state) {
+bool USDAReader::Impl::Read(LoadState state) {
   ///
   /// Setup callbacks.
   ///
@@ -1512,6 +1636,10 @@ bool USDAReader::Impl::Read(ascii::LoadState state) {
 
   RegisterPrimIdxAssignCallback();
 
+  // For composition(load state = !Toplevel)
+  RegisterPrimSpecHandler();
+
+  // For direct Prim reconstruction(load state = Toplevel)
   RegisterReconstructCallback<Model>();  // Generic prim.
 
   RegisterReconstructCallback<GPrim>(); // Geometric prim
@@ -1553,80 +1681,6 @@ bool USDAReader::Impl::Read(ascii::LoadState state) {
     PUSH_ERROR_AND_RETURN("Parse failed:" + _parser.GetError());
   }
 
-#if 0
-  DCOUT("# of toplevel prims = " << std::to_string(PrimSize()));
-
-  {
-    size_t i = 0;
-    for (auto it = PrimBegin(); it != PrimEnd(); ++it, i++) {
-      DCOUT("Prim[" << std::to_string(i) << "].type = " << (*it).type_name());
-    }
-  }
-#endif
-
-#if 0
-    //_sub_layered = (state == LOAD_STATE_SUBLAYER);
-    //_referenced = (state == LOAD_STATE_REFERENCE);
-    //_payloaded = (state == LOAD_STATE_PAYLOAD);
-
-    // Stage meta.
-    if (!_parser.ParseStageMetas()) {
-      PUSH_PARSER_ERROR_AND_RETURN();
-      return false;
-    }
-
-    DCOUT("Done parsing Stage metas");
-
-    // parse blocks
-    while (!_parser.Eof()) {
-      if (!_parser.SkipCommentAndWhitespaceAndNewline()) {
-        PUSH_PARSER_ERROR_AND_RETURN();
-      }
-
-      if (_parser.Eof()) {
-        // Whitespaces in the end of line.
-        break;
-      }
-
-      // Look ahead token
-      auto curr_loc = _parser.CurrLoc();
-      DCOUT("loc = " << curr_loc);
-
-      std::string tok;
-      if (!_parser.ReadIdentifier(&tok)) {
-        DCOUT("Failed to read identifier");
-        PUSH_PARSER_ERROR_AND_RETURN();
-      }
-      DCOUT("tok = " << tok);
-
-      // Rewind
-      if (!_parser.SeekTo(curr_loc)) {
-        PUSH_PARSER_ERROR_AND_RETURN();
-      }
-
-      if (tok == "def") {
-        DCOUT("`def` block");
-        bool block_ok = _parser.ParseDefBlock();
-        if (!block_ok) {
-          PUSH_PARSER_ERROR_AND_RETURN();
-        }
-      } else if (tok == "over") {
-        DCOUT("`over` block");
-        bool block_ok = _parser.ParseOverBlock();
-        if (!block_ok) {
-          PUSH_PARSER_ERROR_AND_RETURN();
-        }
-      } else if (tok == "class") {
-        DCOUT("`class` block");
-        bool block_ok = _parser.ParseClassBlock();
-        if (!block_ok) {
-          PUSH_PARSER_ERROR_AND_RETURN();
-        }
-      } else {
-        PUSH_ERROR_AND_RETURN("Unknown identifier '" + tok + "' for Prim block statement.");
-      }
-    }
-#endif
   return true;
 }
 
@@ -1656,7 +1710,7 @@ USDAReader::USDAReader(StreamReader *sr) { _impl = new Impl(sr); }
 
 USDAReader::~USDAReader() { delete _impl; }
 
-bool USDAReader::Read(ascii::LoadState state) { return _impl->Read(state); }
+bool USDAReader::Read(const LoadState state) { return _impl->Read(state); }
 
 void USDAReader::SetBaseDir(const std::string &dir) {
   return _impl->SetBaseDir(dir);
@@ -1670,6 +1724,8 @@ std::string USDAReader::GetDefaultPrimName() const {
 
 std::string USDAReader::GetError() { return _impl->GetError(); }
 std::string USDAReader::GetWarning() { return _impl->GetWarning(); }
+
+bool USDAReader::GetAsLayer(Layer *layer) { return _impl->GetAsLayer(layer); }
 
 bool USDAReader::ReconstructStage() { return _impl->ReconstructStage(); }
 
@@ -1695,7 +1751,7 @@ USDAReader::~USDAReader() {
 
 bool USDAReader::CheckHeader() { return false; }
 
-bool USDAReader::Read(ascii::LoadState state) {
+bool USDAReader::Read(const LoadState state) {
   (void)state;
   return false;
 }
@@ -1711,6 +1767,8 @@ std::string USDAReader::GetError() {
 }
 std::string USDAReader::GetWarning() { return std::string{}; }
 bool USDAReader::ReconstructStage() { return false; }
+
+bool USDAReader::GetAsLayer(Layer *layer) { return false; }
 
 const Stage &USDAReader::GetStage() const {
   return *_empty_stage;

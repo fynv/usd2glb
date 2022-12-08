@@ -62,6 +62,7 @@ class any;
 };
 
 namespace tinyusdz {
+
 namespace value {
 
 // Identifier is the one used in USDA(Ascii)
@@ -160,6 +161,25 @@ constexpr auto kRelationship = "rel";
 inline std::string Add1DArraySuffix(const std::string &c) { return c + "[]"; }
 
 using token = tinyusdz::Token;
+
+// single or triple-quoted('"""' or ''') string
+struct StringData {
+
+  StringData() = default;
+  StringData(const std::string &v) : value(v) {}
+  StringData &operator=(const std::string &v) {
+    value = v;
+    return (*this);
+  }
+
+  std::string value;
+  bool is_triple_quoted{false};
+  bool single_quote{false};  // true for ', false for "
+
+  // optional(for USDA)
+  int line_row{0};
+  int line_col{0};
+};
 
 // SdfAssetPath
 class AssetPath {
@@ -510,7 +530,10 @@ using double3 = std::array<double, 3>;
 using double4 = std::array<double, 4>;
 
 //
-// OpenGL-like Column-major order
+// Matrix is represented as row-major order as done in pxrUSD.
+// m[i][j] is read as: i'th row, j'th column
+// memory layout is same both for column-major and row-major.
+// (e.g. m[3][0], m[3][1], m[3][2] or a[13], a[14], a[15] are translation components for 4x4 matrix)
 //
 struct matrix2f {
   matrix2f() {
@@ -577,6 +600,18 @@ struct matrix2d {
     m[1][1] = 1.0;
   }
 
+  static matrix2d identity() {
+    matrix2d m;
+
+    m.m[0][0] = 1.0;
+    m.m[0][1] = 0.0;
+
+    m.m[1][0] = 0.0;
+    m.m[1][1] = 1.0;
+
+    return m;
+  }
+
   double m[2][2];
 };
 
@@ -593,6 +628,24 @@ struct matrix3d {
     m[2][0] = 0.0;
     m[2][1] = 0.0;
     m[2][2] = 1.0;
+  }
+
+  static matrix3d identity() {
+    matrix3d m;
+
+    m.m[0][0] = 1.0;
+    m.m[0][1] = 0.0;
+    m.m[0][2] = 0.0;
+
+    m.m[1][0] = 0.0;
+    m.m[1][1] = 1.0;
+    m.m[1][2] = 0.0;
+
+    m.m[2][0] = 0.0;
+    m.m[2][1] = 0.0;
+    m.m[2][2] = 1.0;
+
+    return m;
   }
 
   double m[3][3];
@@ -619,6 +672,32 @@ struct matrix4d {
     m[3][1] = 0.0;
     m[3][2] = 0.0;
     m[3][3] = 1.0;
+  }
+
+  static matrix4d identity() {
+    matrix4d m;
+
+    m.m[0][0] = 1.0;
+    m.m[0][1] = 0.0;
+    m.m[0][2] = 0.0;
+    m.m[0][3] = 0.0;
+
+    m.m[1][0] = 0.0;
+    m.m[1][1] = 1.0;
+    m.m[1][2] = 0.0;
+    m.m[1][3] = 0.0;
+
+    m.m[2][0] = 0.0;
+    m.m[2][1] = 0.0;
+    m.m[2][2] = 1.0;
+    m.m[2][3] = 0.0;
+
+    m.m[3][0] = 0.0;
+    m.m[3][1] = 0.0;
+    m.m[3][2] = 0.0;
+    m.m[3][3] = 1.0;
+
+    return m;
   }
 
   double m[4][4];
@@ -650,6 +729,147 @@ struct frame4d {
   double m[4][4];
 };
 
+// ret = m x n in row-major(n x m in column-major)
+// i.e. You can express TRS transform as
+//
+// p * S * R * T = p'
+// p' = Mult(Mult(S, R), T)
+// 
+// you can express world matrix as
+//
+// node.world = parent.world * node.local
+//            = Mult(parent.world, node.local)
+template <typename MTy, typename STy, size_t N>
+MTy Mult(const MTy &m, const MTy &n) {
+  MTy ret;
+  //memset(ret.m, 0, sizeof(MTy)); 
+
+  for (size_t j = 0; j < N; j++) {
+    for (size_t i = 0; i < N; i++) {
+      STy value = static_cast<STy>(0);
+      for (size_t k = 0; k < N; k++) {
+        value += m.m[j][k] * n.m[k][i];
+      }
+      ret.m[j][i] = value;
+    }
+  }
+
+  return ret;
+}
+
+#if 0
+// Deprecated.
+// TODO: remove column-major functions.
+template <typename MTy, typename STy, size_t N>
+MTy MultColumnMajor(const MTy &m, const MTy &n) {
+  MTy ret;
+  memset(ret.m, 0, sizeof(MTy));
+
+  for (size_t j = 0; j < N; j++) {
+    for (size_t i = 0; i < N; i++) {
+      STy value = static_cast<STy>(0);
+      for (size_t k = 0; k < N; k++) {
+        value += m.m[j][k] * n.m[k][i];
+      }
+      ret.m[j][i] = value;
+    }
+  }
+
+  return ret;
+}
+#endif
+
+// ret = matrix x vector
+// Assume matrixN >= vecN
+template <typename MTy, typename VTy, typename VBaseTy, size_t N>
+VTy MultV(const MTy &m, const VTy &v) {
+  VTy ret;
+
+  for (size_t j = 0; j < N; j++) {
+    VBaseTy value = static_cast<VBaseTy>(0);
+    for (size_t i = 0; i < N; i++) {
+      // TODO: Use MBaseTy for better precison.
+      value += static_cast<VBaseTy>(m.m[i][j]) * v[i];
+    }
+    ret[j] = value;
+  }
+
+  return ret;
+}
+
+template <typename MTy, typename STy, size_t N>
+MTy MatAdd(const MTy &m, const MTy &n) {
+  MTy ret;
+  memset(ret.m, 0, sizeof(MTy));
+
+  for (size_t j = 0; j < N; j++) {
+    for (size_t i = 0; i < N; i++) {
+      ret.m[j][i] = m.m[j][i] + n.m[j][i];
+    }
+  }
+
+  return ret;
+}
+
+template <typename MTy, typename STy, size_t N>
+MTy MatSub(const MTy &m, const MTy &n) {
+  MTy ret;
+  memset(ret.m, 0, sizeof(MTy));
+
+  for (size_t j = 0; j < N; j++) {
+    for (size_t i = 0; i < N; i++) {
+      ret.m[j][i] = m.m[j][i] - n.m[j][i];
+    }
+  }
+
+  return ret;
+}
+
+inline matrix2d operator+(const matrix2d &a, const matrix2d &b) {
+  matrix2d ret = MatAdd<matrix2d, double, 2>(a, b);
+  return ret;
+}
+
+inline matrix2d operator-(const matrix2d &a, const matrix2d &b) {
+  matrix2d ret = MatSub<matrix2d, double, 2>(a, b);
+  return ret;
+}
+
+inline matrix2d operator*(const matrix2d &a, const matrix2d &b) {
+  matrix2d ret = Mult<matrix2d, double, 2>(a, b);
+  return ret;
+}
+
+inline matrix3d operator+(const matrix3d &a, const matrix3d &b) {
+  matrix3d ret = MatAdd<matrix3d, double, 3>(a, b);
+  return ret;
+}
+
+inline matrix3d operator-(const matrix3d &a, const matrix3d &b) {
+  matrix3d ret = MatSub<matrix3d, double, 3>(a, b);
+  return ret;
+}
+
+inline matrix3d operator*(const matrix3d &a, const matrix3d &b) {
+  matrix3d ret = Mult<matrix3d, double, 3>(a, b);
+  return ret;
+}
+
+inline matrix4d operator+(const matrix4d &a, const matrix4d &b) {
+  matrix4d ret = MatAdd<matrix4d, double, 4>(a, b);
+  return ret;
+}
+
+inline matrix4d operator-(const matrix4d &a, const matrix4d &b) {
+  matrix4d ret = MatSub<matrix4d, double, 4>(a, b);
+  return ret;
+}
+
+inline matrix4d operator*(const matrix4d &a, const matrix4d &b) {
+  matrix4d ret = Mult<matrix4d, double, 4>(a, b);
+  return ret;
+}
+
 // Quaternion has memory layout of [x, y, z, w] in Crate(Binary)
 // and QfQuat class in pxrUSD.
 // https://github.com/PixarAnimationStudios/USD/blob/3abc46452b1271df7650e9948fef9f0ce602e3b2/pxr/base/gf/quatf.h#L287
@@ -657,65 +877,71 @@ struct frame4d {
 struct quath {
   half3 imag;
   half real;
+  half operator[](size_t idx) const { return *(&imag[0] + idx); }
+  half &operator[](size_t idx) { return *(&imag[0] + idx); }
 };
 
 struct quatf {
   float3 imag;
   float real;
+  float operator[](size_t idx) const { return *(&imag[0] + idx); }
+  float &operator[](size_t idx) { return *(&imag[0] + idx); }
 };
 
 struct quatd {
   double3 imag;
   double real;
+  double operator[](size_t idx) const { return *(&imag[0] + idx); }
+  double &operator[](size_t idx) { return *(&imag[0] + idx); }
 };
 
 struct vector3h {
   half x, y, z;
 
   half operator[](size_t idx) const { return *(&x + idx); }
-  half operator[](size_t idx) { return *(&x + idx); }
+  half &operator[](size_t idx) { return *(&x + idx); }
 };
 
 struct vector3f {
   float x, y, z;
 
   float operator[](size_t idx) const { return *(&x + idx); }
-  float operator[](size_t idx) { return *(&x + idx); }
+  float &operator[](size_t idx) { return *(&x + idx); }
 };
 
 struct vector3d {
   double x, y, z;
 
   double operator[](size_t idx) const { return *(&x + idx); }
-  double operator[](size_t idx) { return *(&x + idx); }
+  double &operator[](size_t idx) { return *(&x + idx); }
 };
 
 struct normal3h {
   half x, y, z;
 
   half operator[](size_t idx) const { return *(&x + idx); }
-  half operator[](size_t idx) { return *(&x + idx); }
+  half &operator[](size_t idx) { return *(&x + idx); }
 };
 
 struct normal3f {
   float x, y, z;
 
   float operator[](size_t idx) const { return *(&x + idx); }
-  float operator[](size_t idx) { return *(&x + idx); }
+  float &operator[](size_t idx) { return *(&x + idx); }
 };
 
 struct normal3d {
   double x, y, z;
 
   double operator[](size_t idx) const { return *(&x + idx); }
-  double operator[](size_t idx) { return *(&x + idx); }
+  double &operator[](size_t idx) { return *(&x + idx); }
 };
 
 struct point3h {
   half x, y, z;
 
   half operator[](size_t idx) const { return *(&x + idx); }
-  half operator[](size_t idx) { return *(&x + idx); }
+  half &operator[](size_t idx) { return *(&x + idx); }
 };
 
 inline point3h operator+(const float a, const point3h &b) {
@@ -803,7 +1029,7 @@ struct point3f {
   float x, y, z;
 
   float operator[](size_t idx) const { return *(&x + idx); }
-  float operator[](size_t idx) { return *(&x + idx); }
+  float &operator[](size_t idx) { return *(&x + idx); }
 };
 
 inline point3f operator+(const float a, const point3f &b) {
@@ -891,86 +1117,88 @@ struct point3d {
   double x, y, z;
 
   double operator[](size_t idx) const { return *(&x + idx); }
-  double operator[](size_t idx) { return *(&x + idx); }
+  double &operator[](size_t idx) { return *(&x + idx); }
 };
 
 struct color3h {
   half r, g, b;
 
-  // C++11 or later, struct is tightly packed, so use the pointer offset is
-  // valid.
   half operator[](size_t idx) const { return *(&r + idx); }
-  half operator[](size_t idx) { return *(&r + idx); }
+  half &operator[](size_t idx) { return *(&r + idx); }
 };
 
 struct color3f {
   float r, g, b;
 
-  // C++11 or later, struct is tightly packed, so use the pointer offset is
-  // valid.
   float operator[](size_t idx) const { return *(&r + idx); }
-  float operator[](size_t idx) { return *(&r + idx); }
+  float &operator[](size_t idx) { return *(&r + idx); }
 };
 
 struct color4h {
   half r, g, b, a;
 
-  // C++11 or later, struct is tightly packed, so use the pointer offset is
-  // valid.
   half operator[](size_t idx) const { return *(&r + idx); }
-  half operator[](size_t idx) { return *(&r + idx); }
+  half &operator[](size_t idx) { return *(&r + idx); }
 };
 
 struct color4f {
   float r, g, b, a;
 
-  // C++11 or later, struct is tightly packed, so use the pointer offset is
-  // valid.
   float operator[](size_t idx) const { return *(&r + idx); }
-  float operator[](size_t idx) { return *(&r + idx); }
+  float &operator[](size_t idx) { return *(&r + idx); }
 };
 
 struct color3d {
   double r, g, b;
 
-  // C++11 or later, struct is tightly packed, so use the pointer offset is
-  // valid.
   double operator[](size_t idx) const { return *(&r + idx); }
-  double operator[](size_t idx) { return *(&r + idx); }
+  double &operator[](size_t idx) { return *(&r + idx); }
 };
 
 struct color4d {
   double r, g, b, a;
 
-  // C++11 or later, struct is tightly packed, so use the pointer offset is
-  // valid.
   double operator[](size_t idx) const { return *(&r + idx); }
-  double operator[](size_t idx) { return *(&r + idx); }
+  double &operator[](size_t idx) { return *(&r + idx); }
 };
 
 struct texcoord2h {
   half s, t;
+  half operator[](size_t idx) const { return *(&s + idx); }
+  half &operator[](size_t idx) { return *(&s + idx); }
 };
 
 struct texcoord2f {
   float s, t;
+  float operator[](size_t idx) const { return *(&s + idx); }
+  float &operator[](size_t idx) { return *(&s + idx); }
 };
 
 struct texcoord2d {
   double s, t;
+  double operator[](size_t idx) const { return *(&s + idx); }
+  double &operator[](size_t idx) { return *(&s + idx); }
 };
 
 struct texcoord3h {
   half s, t, r;
+  half operator[](size_t idx) const { return *(&s + idx); }
+  half &operator[](size_t idx) { return *(&s + idx); }
 };
 
 struct texcoord3f {
   float s, t, r;
+  float operator[](size_t idx) const { return *(&s + idx); }
+  float &operator[](size_t idx) { return *(&s + idx); }
 };
 
 struct texcoord3d {
   double s, t, r;
+  double operator[](size_t idx) const { return *(&s + idx); }
+  double &operator[](size_t idx) { return *(&s + idx); }
 };
+
+
 
 // Attribute value Block(`None`)
 struct ValueBlock {};
@@ -994,11 +1222,12 @@ template <>
 struct TypeTraits<void> {
   using value_type = void;
   using value_underlying_type = void;
-  static constexpr uint32_t ndim = 0; /* array dim */
+  static constexpr uint32_t ndim() { return 0; } /* array dim */
   static constexpr uint32_t size = 0; /* zero for void  */
-  static constexpr uint32_t ncomp = 0;
-  static constexpr uint32_t type_id = TYPE_ID_VOID;
-  static constexpr uint32_t underlying_type_id = TYPE_ID_VOID;
+  static constexpr uint32_t ncomp() { return 0; }
+  static constexpr uint32_t type_id() { return TYPE_ID_VOID; }
+  static constexpr uint32_t get_type_id() { return TYPE_ID_VOID; }
+  static constexpr uint32_t underlying_type_id() { return TYPE_ID_VOID; }
   static std::string type_name() { return "void"; }
   static std::string underlying_type_name() { return "void"; }
 };
@@ -1088,8 +1317,10 @@ DEFINE_ROLE_TYPE_TRAIT(texcoord3d, kTexCoord3d, TYPE_ID_TEXCOORD3D, double3);
 //
 //
 //
+
 DEFINE_TYPE_TRAIT(token, kToken, TYPE_ID_TOKEN, 1);
 DEFINE_TYPE_TRAIT(std::string, kString, TYPE_ID_STRING, 1);
+DEFINE_TYPE_TRAIT(StringData, kString, TYPE_ID_STRING_DATA, 1);
 DEFINE_TYPE_TRAIT(dict, kDictionary, TYPE_ID_DICT, 1);
 
 DEFINE_TYPE_TRAIT(AssetPath, kAssetPath, TYPE_ID_ASSET_PATH, 1);
@@ -1106,19 +1337,21 @@ DEFINE_TYPE_TRAIT(AssetPath, kAssetPath, TYPE_ID_ASSET_PATH, 1);
 template <typename T>
 struct TypeTraits<std::vector<T>> {
   using value_type = std::vector<T>;
-  static constexpr uint32_t ndim = 1; /* array dim */
-  static constexpr uint32_t ncomp = TypeTraits<T>::ncomp;
-  static constexpr uint32_t type_id =
-      TypeTraits<T>::type_id | TYPE_ID_1D_ARRAY_BIT;
-  static constexpr uint32_t underlying_type_id =
-      TypeTraits<T>::underlying_type_id | TYPE_ID_1D_ARRAY_BIT;
+  static constexpr uint32_t ndim() { return 1; } /* array dim */
+  static constexpr uint32_t ncomp() { return TypeTraits<T>::ncomp(); }
+  static constexpr uint32_t type_id() { return
+      TypeTraits<T>::type_id() | TYPE_ID_1D_ARRAY_BIT; }
+  static constexpr uint32_t get_type_id() {
+      return TypeTraits<T>::type_id() | TYPE_ID_1D_ARRAY_BIT; }
+  static constexpr uint32_t underlying_type_id() {
+      return TypeTraits<T>::underlying_type_id() | TYPE_ID_1D_ARRAY_BIT; }
   static std::string type_name() { return TypeTraits<T>::type_name() + "[]"; }
   static std::string underlying_type_name() {
     return TypeTraits<T>::underlying_type_name() + "[]";
   }
 };
 
-#if 0  // Current pxrUSD does not support 2D array 
+#if 0  // Current pxrUSD does not support 2D array
 // 2D Array
 // TODO(syoyo): support 3D array?
 template <typename T>
@@ -1200,9 +1433,9 @@ class Value {
   // Return nullptr when type conversion failed.
   template <class T>
   const T *as() const {
-    if (TypeTraits<T>::type_id == v_.type_id()) {
+    if (TypeTraits<T>::type_id() == v_.type_id()) {
       return linb::any_cast<const T>(&v_);
-    } else if (TypeTraits<T>::underlying_type_id == v_.underlying_type_id()) {
+    } else if (TypeTraits<T>::underlying_type_id() == v_.underlying_type_id()) {
       // `roll` type. Can be able to cast to underlying type since the memory
       // layout does not change.
       return linb::any_cast<const T>(&v_);
@@ -1214,9 +1447,9 @@ class Value {
   // Return nullptr when type conversion failed.
   template <class T>
   T *as() {
-    if (TypeTraits<T>::type_id == v_.type_id()) {
+    if (TypeTraits<T>::type_id() == v_.type_id()) {
       return linb::any_cast<T>(&v_);
-    } else if (TypeTraits<T>::underlying_type_id == v_.underlying_type_id()) {
+    } else if (TypeTraits<T>::underlying_type_id() == v_.underlying_type_id()) {
       // `roll` type. Can be able to cast to underlying type since the memory
       // layout does not change.
       return linb::any_cast<T>(&v_);
@@ -1239,7 +1472,7 @@ class Value {
   // Type-safe way to get concrete value.
   template <class T>
   nonstd::optional<T> get_value() const {
-    if (TypeTraits<T>::type_id == v_.type_id()) {
+    if (TypeTraits<T>::type_id() == v_.type_id()) {
       const T *pv = linb::any_cast<const T>(&v_);
       if (!pv) {
         // ???
@@ -1247,7 +1480,7 @@ class Value {
       }
 
       return std::move(*pv);
-    } else if (TypeTraits<T>::underlying_type_id == v_.underlying_type_id()) {
+    } else if (TypeTraits<T>::underlying_type_id() == v_.underlying_type_id()) {
       // `roll` type. Can be able to cast to underlying type since the memory
       // layout does not change.
       // Use force cast
@@ -1265,9 +1498,19 @@ class Value {
 
   const linb::any &get_raw() const { return v_; }
 
+  bool is_array() const { return (v_.type_id() & value::TYPE_ID_1D_ARRAY_BIT); }
+
+  // return 0 for non array type.
+  // This method is primaliry for Primvar types(`float[]`, `color3f[]`, ...)
+  // It does not report non-Primvar types(e.g. `Reference`, `Xform`, `GeomMesh`,
+  // ...)
+  size_t array_size() const;
+
+  bool is_empty() const { return v_.type_id() == value::TYPE_ID_NULL; }
+
  private:
   // any_value v_;
-  linb::any v_;
+  linb::any v_{nullptr};
 };
 
 // TimeSample interpolation type.
@@ -1309,13 +1552,13 @@ enum class TimeSampleInterpolationType {
 // quath, quatf, quatd
 // (use slerp for quaternion type)
 
-
 bool IsLerpSupportedType(uint32_t tyid);
 
 ///
 /// @param[in] dt interpolator [0.0, 1.0)
 ///
-bool Lerp(const value::Value &a, const value::Value &b, double dt, value::Value *dst);
+bool Lerp(const value::Value &a, const value::Value &b, double dt,
+          value::Value *dst);
 
 // Handy, but may not be efficient for large time samples(e.g. 1M samples or
 // more)
@@ -1337,13 +1580,9 @@ struct TimeSamples {
     bool blocked{false};
   };
 
-  bool empty() const {
-    return _samples.empty();
-  }
+  bool empty() const { return _samples.empty(); }
 
-  size_t size() const {
-    return _samples.size();
-  }
+  size_t size() const { return _samples.size(); }
 
   void clear() {
     _samples.clear();
@@ -1382,7 +1621,6 @@ struct TimeSamples {
   }
 
   uint32_t type_id() const {
-
     if (_samples.size()) {
       if (_dirty) {
         update();
@@ -1428,7 +1666,6 @@ struct TimeSamples {
     _samples.emplace_back(s);
     _dirty = true;
   }
-  
 
   const std::vector<Sample> &get_samples() const {
     if (_dirty) {
@@ -1444,11 +1681,11 @@ struct TimeSamples {
     return _samples;
   }
 
-#if 1 // TODO: Write implementation in .cc 
+#if 1  // TODO: Write implementation in .cc
   // Get value at specified time.
   // Return linearly interpolated value when TimeSampleInterpolationType is
   // Linear. Returns nullopt when specified time is out-of-range.
-  template<typename T>
+  template <typename T>
   bool get(T *dst, double t = value::TimeCode::Default(),
            TimeSampleInterpolationType interp =
                TimeSampleInterpolationType::Held) const {
@@ -1519,11 +1756,22 @@ struct TimeSamples {
   }
 #endif
 
-
  private:
   mutable std::vector<Sample> _samples;
   mutable bool _dirty{false};
 };
+
+///
+/// Cast input value's type to Role type
+/// Return true: cast success.
+///
+bool RoleTypeCast(const uint32_t roleTyId, value::Value &inout);
+
+///
+/// Upcast value to specified type(e.g. `half` -> `float`)
+/// Return Upcast success.
+///
+bool UpcastType(const std::string &toType, value::Value &inout);
 
 #if 0
 // simple linear interpolator
@@ -1653,4 +1901,3 @@ static_assert(sizeof(color4f) == 16, "sizeof(color4f) must be 16");
 }  // namespace value
 
 }  // namespace tinyusdz
-

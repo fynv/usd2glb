@@ -5,11 +5,16 @@
 //
 #include "prim-types.hh"
 #include "str-util.hh"
+#include "tiny-format.hh"
 //
 #include "usdGeom.hh"
-#include "usdSkel.hh"
 #include "usdLux.hh"
 #include "usdShade.hh"
+#include "usdSkel.hh"
+//
+#include "common-macros.inc"
+#include "value-pprint.hh"
+#include "pprinter.hh"
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -23,7 +28,6 @@
 #endif
 
 namespace tinyusdz {
-
 
 nonstd::optional<Interpolation> InterpolationFromString(const std::string &v) {
   if ("faceVarying" == v) {
@@ -71,9 +75,9 @@ Path::Path(const std::string &p, const std::string &prop) {
   //
   // For absolute path, starts with '/' and no other '/' exists.
   // For property part, '.' exists only once.
-  (void)prop;
+  //
 
-  if (p.size() < 1) {
+  if (p.empty() && prop.empty()) {
     _valid = false;
     return;
   }
@@ -81,7 +85,24 @@ Path::Path(const std::string &p, const std::string &prop) {
   auto slash_fun = [](const char c) { return c == '/'; };
   auto dot_fun = [](const char c) { return c == '.'; };
 
+  std::vector<std::string> prims = split(p, "/");
+
   // TODO: More checks('{', '[', ...)
+
+  if (prop.size()) {
+    // prop should not contain slashes
+    auto nslashes = std::count_if(prop.begin(), prop.end(), slash_fun);
+    if (nslashes) {
+      _valid = false;
+      return;
+    }
+
+    // prop does not start with '.'
+    if (startsWith(prop, ".")) {
+      _valid = false;
+      return;
+    }
+  }
 
   if (p[0] == '/') {
     // absolute path
@@ -91,8 +112,26 @@ Path::Path(const std::string &p, const std::string &prop) {
     if (ndots == 0) {
       // absolute prim.
       _prim_part = p;
+
+      if (prop.size()) {
+        _prop_part = prop;
+        _element = prop;
+      } else {
+        if (prims.size()) {
+          _element = prims[prims.size()-1];
+        } else {
+          _element = p;
+        }
+      }
       _valid = true;
     } else if (ndots == 1) {
+      // prim_part contains property name.
+      if (prop.size()) {
+        // prop must be empty.
+        _valid = false;
+        return;
+      }
+
       if (p.size() < 3) {
         // "/."
         _valid = false;
@@ -114,14 +153,9 @@ Path::Path(const std::string &p, const std::string &prop) {
       // split
       std::string prop_name = p.substr(size_t(loc));
 
-      // Check if No '/' in prop_part
-      if (std::count_if(prop_name.begin(), prop_name.end(), slash_fun) > 0) {
-        _valid = false;
-        return;
-      }
-
       _prop_part = prop_name.erase(0, 1);  // remove '.'
       _prim_part = p.substr(0, size_t(loc));
+      _element = _prop_part; // elementName is property path
 
       _valid = true;
 
@@ -131,7 +165,10 @@ Path::Path(const std::string &p, const std::string &prop) {
     }
 
   } else if (p[0] == '.') {
-    // property
+    // maybe relative(e.g. "./xform", "../xform")
+    // FIXME: Support relative path fully
+
+#if 0
     auto nslashes = std::count_if(p.begin(), p.end(), slash_fun);
     if (nslashes > 0) {
       _valid = false;
@@ -141,6 +178,21 @@ Path::Path(const std::string &p, const std::string &prop) {
     _prop_part = p;
     _prop_part = _prop_part.erase(0, 1);
     _valid = true;
+#else
+    _prim_part = p;
+    if (prop.size()) {
+      _prop_part = prop;
+      _element = prop;
+    } else {
+      if (prims.size()) {
+        _element = prims[prims.size()-1];
+      } else {
+        _element = p;
+      }
+    }
+    _valid = true;
+
+#endif
 
   } else {
     // prim.prop
@@ -149,6 +201,9 @@ Path::Path(const std::string &p, const std::string &prop) {
     if (ndots == 0) {
       // relative prim.
       _prim_part = p;
+      if (prop.size()) {
+        _prop_part = prop;
+      }
       _valid = true;
     } else if (ndots == 1) {
       if (p.size() < 3) {
@@ -191,7 +246,7 @@ Path::Path(const std::string &p, const std::string &prop) {
 }
 
 Path Path::append_property(const std::string &elem) {
-  Path p = (*this);
+  Path &p = (*this);
 
   if (elem.empty()) {
     p._valid = false;
@@ -221,6 +276,22 @@ Path Path::append_property(const std::string &elem) {
 
     return p;
   }
+}
+
+const Path Path::AppendPrim(const std::string &elem) const {
+  Path p = (*this);  // copies
+
+  p.append_prim(elem);
+
+  return p;
+}
+
+const Path Path::AppendProperty(const std::string &elem) const {
+  Path p = (*this);  // copies
+
+  p.append_property(elem);
+
+  return p;
 }
 
 std::pair<Path, Path> Path::split_at_root() const {
@@ -263,7 +334,7 @@ std::pair<Path, Path> Path::split_at_root() const {
 }
 
 Path Path::append_element(const std::string &elem) {
-  Path p = (*this);
+  Path &p = (*this);
 
   if (elem.empty()) {
     p._valid = false;
@@ -325,6 +396,18 @@ Path Path::get_parent_prim_path() const {
   return Path(_prim_part.substr(0, n), "");
 }
 
+const std::string &Path::element_name() const {
+  if (_element.empty()) {
+    // Get last item.
+    std::vector<std::string> tokenized_prim_names = split(prim_part(), "/");
+    if (tokenized_prim_names.size()) {
+      _element = tokenized_prim_names[size_t(tokenized_prim_names.size() - 1)];
+    }
+  }
+
+  return _element;
+}
+
 nonstd::optional<Kind> KindFromString(const std::string &str) {
   if (str == "model") {
     return Kind::Model;
@@ -343,8 +426,7 @@ nonstd::optional<Kind> KindFromString(const std::string &str) {
   return nonstd::nullopt;
 }
 
-bool ValidatePrimName(const std::string &name)
-{
+bool ValidatePrimName(const std::string &name) {
   if (name.empty()) {
     return false;
   }
@@ -371,7 +453,6 @@ bool ValidatePrimName(const std::string &name)
   }
 
   return true;
-
 }
 
 //
@@ -381,12 +462,11 @@ bool ValidatePrimName(const std::string &name)
 namespace {
 
 const PrimMeta *GetPrimMeta(const value::Value &v) {
-
   // Lookup PrimMeta variable in Prim class
 
-#define GET_PRIM_META(__ty) \
-  if (v.as<__ty>()) {                      \
-    return &(v.as<__ty>()->meta);            \
+#define GET_PRIM_META(__ty)       \
+  if (v.as<__ty>()) {             \
+    return &(v.as<__ty>()->meta); \
   }
 
   GET_PRIM_META(Model)
@@ -421,7 +501,6 @@ const PrimMeta *GetPrimMeta(const value::Value &v) {
   GET_PRIM_META(Skeleton)
   GET_PRIM_META(SkelAnimation)
   GET_PRIM_META(BlendShape)
-
 
 #undef GET_PRIM_META
 
@@ -429,12 +508,11 @@ const PrimMeta *GetPrimMeta(const value::Value &v) {
 }
 
 PrimMeta *GetPrimMeta(value::Value &v) {
-
   // Lookup PrimMeta variable in Prim class
 
-#define GET_PRIM_META(__ty) \
-  if (v.as<__ty>()) {                      \
-    return &(v.as<__ty>()->meta);            \
+#define GET_PRIM_META(__ty)       \
+  if (v.as<__ty>()) {             \
+    return &(v.as<__ty>()->meta); \
   }
 
   GET_PRIM_META(Model)
@@ -469,7 +547,6 @@ PrimMeta *GetPrimMeta(value::Value &v) {
   GET_PRIM_META(Skeleton)
   GET_PRIM_META(SkelAnimation)
   GET_PRIM_META(BlendShape)
-
 
 #undef GET_PRIM_META
 
@@ -595,11 +672,7 @@ nonstd::optional<std::string> GetPrimElementName(const value::Value &v) {
   EXTRACT_NAME_AND_RETURN_PATH(SkelRoot)
   EXTRACT_NAME_AND_RETURN_PATH(Skeleton)
   EXTRACT_NAME_AND_RETURN_PATH(SkelAnimation)
-  EXTRACT_NAME_AND_RETURN_PATH(BlendShape)
-  {
-    return nonstd::nullopt;
-  }
-
+  EXTRACT_NAME_AND_RETURN_PATH(BlendShape) { return nonstd::nullopt; }
 
 #undef EXTRACT_NAME_AND_RETURN_PATH
 
@@ -607,14 +680,13 @@ nonstd::optional<std::string> GetPrimElementName(const value::Value &v) {
 }
 
 bool SetPrimElementName(value::Value &v, const std::string &elementName) {
-
   // Lookup name field of Prim class
   bool ok{false};
 
 #define SET_ELEMENT_NAME(__name, __ty) \
-  if (v.as<__ty>()) {                      \
-    v.as<__ty>()->name = __name;             \
-    ok = true; \
+  if (v.as<__ty>()) {                  \
+    v.as<__ty>()->name = __name;       \
+    ok = true;                         \
   } else
 
   SET_ELEMENT_NAME(elementName, Model)
@@ -648,17 +720,12 @@ bool SetPrimElementName(value::Value &v, const std::string &elementName) {
   SET_ELEMENT_NAME(elementName, SkelRoot)
   SET_ELEMENT_NAME(elementName, Skeleton)
   SET_ELEMENT_NAME(elementName, SkelAnimation)
-  SET_ELEMENT_NAME(elementName, BlendShape)
-  {
-    return false;
-  }
-
+  SET_ELEMENT_NAME(elementName, BlendShape) { return false; }
 
 #undef SET_ELEMENT_NAME
 
   return ok;
 }
-
 
 Prim::Prim(const value::Value &rhs) {
   // Check if type is Prim(Model(GPrim), usdShade, usdLux, etc.)
@@ -709,9 +776,8 @@ Prim::Prim(const std::string &elementPath, value::Value &&rhs) {
   // Check if type is Prim(Model(GPrim), usdShade, usdLux, etc.)
   if ((value::TypeId::TYPE_ID_MODEL_BEGIN <= rhs.type_id()) &&
       (value::TypeId::TYPE_ID_MODEL_END > rhs.type_id())) {
-
-    _path = Path(elementPath, /* prop part */"");
-    _elementPath = Path(elementPath, /* prop part */"");
+    _path = Path(elementPath, /* prop part */ "");
+    _elementPath = Path(elementPath, /* prop part */ "");
 
     _data = std::move(rhs);
     SetPrimElementName(_data, elementPath);
@@ -721,7 +787,8 @@ Prim::Prim(const std::string &elementPath, value::Value &&rhs) {
 }
 
 //
-// To deal with clang's -Wexit-time-destructors, dynamically allocate buffer for PrimMeta.
+// To deal with clang's -Wexit-time-destructors, dynamically allocate buffer for
+// PrimMeta.
 //
 // NOTE: not thread-safe.
 //
@@ -749,10 +816,7 @@ class EmptyStaticMeta {
 
 PrimMeta *EmptyStaticMeta::s_meta = nullptr;
 
-
-
 PrimMeta &Prim::metas() {
-
   PrimMeta *p = GetPrimMeta(_data);
   if (p) {
     return *p;
@@ -763,7 +827,6 @@ PrimMeta &Prim::metas() {
 }
 
 const PrimMeta &Prim::metas() const {
-
   const PrimMeta *p = GetPrimMeta(_data);
   if (p) {
     return *p;
@@ -773,5 +836,365 @@ const PrimMeta &Prim::metas() const {
   return EmptyStaticMeta::GetEmptyStaticMeta();
 }
 
+bool SetCustomDataByKey(const std::string &key, const MetaVariable &var,
+                        CustomDataType &custom) {
+  // split by namespace
+  std::vector<std::string> names = split(key, ":");
+  DCOUT("names = " << to_string(names));
+
+  if (names.empty()) {
+    DCOUT("names is empty");
+    return false;
+  }
+
+  if (names.size() > 1024) {
+    // too deep
+    DCOUT("too deep");
+    return false;
+  }
+
+  CustomDataType *curr = &custom;
+
+  for (size_t i = 0; i < names.size(); i++) {
+    const std::string &elemkey = names[i];
+    DCOUT("elemkey = " << elemkey);
+
+    if (i == (names.size() - 1)) {
+      DCOUT("leaf");
+      // leaf
+      curr->emplace(elemkey, var);
+    } else {
+      auto it = curr->find(elemkey);
+      if (it != curr->end()) {
+        // must be CustomData type
+        value::Value &data = it->second.get_raw_value();
+        CustomDataType *p = data.as<CustomDataType>();
+        if (p) {
+          curr = p;
+        } else {
+          DCOUT("value is not dictionary");
+          return false;
+        }
+      } else {
+        // Add empty dictionary.
+        CustomDataType customData;
+        curr->emplace(elemkey, customData);
+        DCOUT("add dict " << elemkey);
+
+        MetaVariable &child = curr->at(elemkey);
+        value::Value &data = child.get_raw_value();
+        CustomDataType *childp = data.as<CustomDataType>();
+        if (!childp) {
+          DCOUT("childp is null");
+          return false;
+        }
+
+        DCOUT("child = " << print_customData(*childp, "child", uint32_t(i)));
+
+        // renew curr
+        curr = childp;
+      }
+    }
+  }
+
+  DCOUT("dict = " << print_customData(custom, "custom", 0));
+
+
+  return true;
+}
+
+bool HasCustomDataKey(const CustomDataType &custom, const std::string &key) {
+  // split by namespace
+  std::vector<std::string> names = split(key, ":");
+
+  DCOUT(print_customData(custom, "customData", 0));
+
+  if (names.empty()) {
+    DCOUT("empty");
+    return false;
+  }
+
+  if (names.size() > 1024) {
+    DCOUT("too deep");
+    // too deep
+    return false;
+  }
+
+  const CustomDataType *curr = &custom;
+
+  for (size_t i = 0; i < names.size(); i++) {
+    const std::string &elemkey = names[i];
+    DCOUT("elemkey = " << elemkey);
+
+    DCOUT("dict = " << print_customData(*curr, "dict", uint32_t(i)));
+
+    auto it = curr->find(elemkey);
+    if (it == curr->end()) {
+      DCOUT("key not found");
+      return false;
+    }
+
+    if (i == (names.size() - 1)) {
+      // leaf .ok
+    } else {
+      // must be CustomData type
+      const value::Value &data = it->second.get_raw_value();
+      const CustomDataType *p = data.as<CustomDataType>();
+      if (p) {
+        curr = p;
+      } else {
+        DCOUT("value is not dictionary type.");
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+bool GetCustomDataByKey(const CustomDataType &custom, const std::string &key,
+                        MetaVariable *var) {
+
+  if (!var) {
+    return false;
+  }
+
+  DCOUT(print_customData(custom, "customData", 0));
+
+  // split by namespace
+  std::vector<std::string> names = split(key, ":");
+
+  if (names.empty()) {
+    return false;
+  }
+
+  if (names.size() > 1024) {
+    // too deep
+    return false;
+  }
+
+  const CustomDataType *curr = &custom;
+
+  for (size_t i = 0; i < names.size(); i++) {
+    const std::string &elemkey = names[i];
+
+    auto it = curr->find(elemkey);
+    if (it == curr->end()) {
+      return false;
+    }
+
+    if (i == (names.size() - 1)) {
+      // leaf
+      (*var) = it->second;
+    } else {
+      // must be CustomData type
+      const value::Value &data = it->second.get_raw_value();
+      const CustomDataType *p = data.as<CustomDataType>();
+      if (p) {
+        curr = p;
+      } else {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+// TODO: Do test more.
+// Current implementation may not behave as in pxrUSD's SdfPath's _LessThanInternal implementation
+bool Path::LessThan(const Path &lhs, const Path &rhs) {
+  DCOUT("LessThan");
+  if (lhs.is_valid() && rhs.is_valid()) {
+    // ok
+  } else {
+    DCOUT("invalid");
+    return false;
+  }
+
+  // TODO: handle relative path correctly.
+  if (lhs.is_absolute_path() && rhs.is_absolute_path()) {
+    // ok
+  } else {
+    DCOUT("not absolute path");
+    return false;
+  }
+
+
+  const std::string &lhs_prop_part = lhs.prop_part();
+  const std::string &rhs_prop_part = rhs.prop_part();
+
+  const std::vector<std::string> lhs_prim_names = split(lhs.prim_part(), "/");
+  const std::vector<std::string> rhs_prim_names = split(rhs.prim_part(), "/");
+  DCOUT("lhs_names = " << to_string(lhs_prim_names));
+  DCOUT("rhs_names = " << to_string(rhs_prim_names));
+
+  // less Prim depth = less than.
+  // same Prim depth, lexicographically compare each Prim name
+  // When Prim path is same, compare property name
+
+  if (lhs_prim_names.size() < rhs_prim_names.size()) {
+    return true;
+  } else if (lhs_prim_names.size() == rhs_prim_names.size()) {
+    // continue
+  } else {
+    DCOUT("greater");
+    return false;
+  }
+
+  for (size_t i = 0; i < lhs_prim_names.size(); i++) {
+    DCOUT(fmt::format("{}/{} compare = {}", i, lhs_prim_names.size(), lhs_prim_names[i].compare(rhs_prim_names[i])));
+
+#if 1
+    const std::string &lhs_name = lhs_prim_names[i];
+    const std::string &rhs_name = rhs_prim_names[i];
+
+    if (lhs_name.compare(rhs_name) == 0) {
+      // equal. continue check.
+    } else {
+      // FIXME: We can simply use std::string::compare?
+      return std::lexicographical_compare(lhs_name.begin(), lhs_name.end(), rhs_name.begin(), rhs_name.end());
+    }
+#else
+    if (lhs_prim_names[i].compare(rhs_prim_names[i]) < 0) {
+      return true;
+    } else if (lhs_prim_names[i].compare(rhs_prim_names[i]) > 0) {
+      return false;
+    } else {
+      // equal. continue check.
+    }
+
+#endif
+  }
+
+  // prim path is equal.
+  if (lhs_prop_part.empty() && rhs_prop_part.empty()) {
+    // no prop part
+    return false;
+  }
+
+  if (lhs_prop_part.empty()) {
+    DCOUT("rhs has prim part.");
+    return true;
+  }
+
+  DCOUT("prop compare." << lhs_prop_part.compare(rhs_prop_part));
+  return (lhs_prop_part.compare(rhs_prop_part) < 0);
+}
+
+bool IsXformablePrim(const Prim &prim) {
+
+  uint32_t tyid = prim.type_id();
+
+  // GeomSubset is not xformable
+
+  switch (tyid) {
+  case value::TYPE_ID_GPRIM: { return true; }
+  case value::TYPE_ID_GEOM_XFORM: { return true; }
+  case value::TYPE_ID_GEOM_MESH: { return true; }
+  case value::TYPE_ID_GEOM_BASIS_CURVES: { return true; }
+  case value::TYPE_ID_GEOM_SPHERE: { return true; }
+  case value::TYPE_ID_GEOM_CUBE: { return true; }
+  case value::TYPE_ID_GEOM_CYLINDER: { return true; }
+  case value::TYPE_ID_GEOM_CONE: { return true; }
+  case value::TYPE_ID_GEOM_CAPSULE: { return true; }
+  case value::TYPE_ID_GEOM_POINTS: { return true; }
+  // value::TYPE_ID_GEOM_GEOMSUBSET
+  case value::TYPE_ID_GEOM_POINT_INSTANCER: { return true; }
+  case value::TYPE_ID_GEOM_CAMERA: { return true; }
+  case value::TYPE_ID_LUX_DOME: { return true; }
+  case value::TYPE_ID_LUX_CYLINDER: { return true; }
+  case value::TYPE_ID_LUX_SPHERE: { return true; }
+  case value::TYPE_ID_LUX_DISK: { return true; }
+  case value::TYPE_ID_LUX_DISTANT: { return true; }
+  case value::TYPE_ID_LUX_RECT: { return true; }
+  case value::TYPE_ID_LUX_GEOMETRY: { return true; }
+  case value::TYPE_ID_LUX_PORTAL: { return true; }
+  case value::TYPE_ID_LUX_PLUGIN: { return true; }
+  case value::TYPE_ID_SKEL_ROOT: { return true; }
+  case value::TYPE_ID_SKELETON: { return true; }
+  default:
+    return false;
+  }
+
+}
+
+bool CastToXformable(const Prim &prim, const Xformable **xformable) {
+
+  if (!xformable) {
+    return false;
+  }
+
+  // __ty = class derived from Xformable.
+#define TRY_CAST(__ty) \
+  if (auto pv = prim.as<__ty>()) { \
+    (*xformable) = pv; \
+    return true; \
+  }
+
+  // TODO: Use tydra::ApplyToXformable
+  TRY_CAST(GPrim)
+  TRY_CAST(Xform)
+  TRY_CAST(GeomMesh)
+  TRY_CAST(GeomBasisCurves)
+  TRY_CAST(GeomCube)
+  TRY_CAST(GeomSphere)
+  TRY_CAST(GeomCylinder)
+  TRY_CAST(GeomCone)
+  TRY_CAST(GeomCapsule)
+  TRY_CAST(GeomPoints)
+  //TRY_CAST(GeomPointInstancer)
+  TRY_CAST(GeomCamera)
+  TRY_CAST(SkelRoot)
+  TRY_CAST(Skeleton)
+  TRY_CAST(RectLight)
+  TRY_CAST(DomeLight)
+  TRY_CAST(CylinderLight)
+  TRY_CAST(SphereLight)
+  TRY_CAST(DiskLight)
+  TRY_CAST(DistantLight)
+  TRY_CAST(RectLight)
+  TRY_CAST(GeometryLight)
+  TRY_CAST(PortalLight)
+  TRY_CAST(PluginLight)
+  TRY_CAST(SkelRoot)
+  TRY_CAST(Skeleton)
+
+  return false;
+
+}
+
+value::matrix4d GetLocalTransform(const Prim &prim, bool *resetXformStack, double t, value::TimeSampleInterpolationType tinterp) {
+  if (!IsXformablePrim(prim)) {
+    if (resetXformStack) {
+      (*resetXformStack) = false;
+    }
+    return value::matrix4d::identity();
+  }
+
+  // default false
+  if (resetXformStack) {
+    (*resetXformStack) = false;
+  }
+
+  const Xformable *xformable{nullptr};
+  if (CastToXformable(prim, &xformable)) {
+    if (!xformable) {
+      return value::matrix4d::identity();
+    }
+
+    value::matrix4d m;
+    bool rxs{false};
+    nonstd::expected<value::matrix4d, std::string> ret = xformable->GetLocalMatrix(t, tinterp, &rxs);
+    if (ret) {
+      if (resetXformStack) {
+        (*resetXformStack) = rxs;
+      }
+      return ret.value();
+    }
+  }
+
+  return value::matrix4d::identity();
+}
 
 }  // namespace tinyusdz

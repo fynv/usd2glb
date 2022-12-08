@@ -58,6 +58,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "prim-types.hh"
 #include "texture-types.hh"
 #include "usdGeom.hh"
+#include "usdLux.hh"
+#include "usdShade.hh"
+#include "usdSkel.hh"
+//#include "usdVox.hh"
 #include "stage.hh"
 
 namespace tinyusdz {
@@ -85,6 +89,13 @@ struct USDLoadOptions {
   /// be loaded, Set this false.
   ///
   bool load_assets{true};
+
+  ///
+  /// (experimental)
+  /// Do composition on load(Load sublayers, references, etc)
+  /// For USDZ model, this should be false.
+  ///
+  bool do_composition{false};
 
   ///
   /// Max MBs allowed for each asset file(e.g. jpeg)
@@ -168,7 +179,7 @@ bool LoadUSDZFromFile(const std::string &filename, Stage *stage,
                       const USDLoadOptions &options = USDLoadOptions());
 
 #ifdef _WIN32
-// WideChar version
+// WideChar(Unicode filename) version
 bool LoadUSDZFromFile(const std::wstring &filename, Stage *stage,
                       std::string *warn, std::string *err,
                       const USDLoadOptions &options = USDLoadOptions());

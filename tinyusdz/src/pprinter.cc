@@ -9,6 +9,9 @@
 #include "value-pprint.hh"
 #include "str-util.hh"
 
+// TODO:
+// - [ ] Print properties based on its appearance(USDA) or "properties" Prim field(USC)
+
 namespace tinyusdz {
 namespace {
 
@@ -98,7 +101,7 @@ std::ostream &operator<<(std::ostream &ofs, const tinyusdz::Payload &v) {
   return ofs;
 }
 
-std::ostream &operator<<(std::ostream &ofs, const tinyusdz::StringData &v) {
+std::ostream &operator<<(std::ostream &ofs, const tinyusdz::value::StringData &v) {
 
   std::string delim = v.single_quote ? "'" : "\"";
 
@@ -276,20 +279,20 @@ std::string print_references(const prim::ReferenceList &references, const uint32
   return ss.str();
 }
 
-std::string print_rel(const Relationship &rel, const std::string &name, uint32_t indent)
+std::string print_rel_only(const Relationship &rel, const std::string &name, uint32_t indent)
 {
   std::stringstream ss;
 
   ss << "rel " << name;
 
-  if (rel.is_empty()) {
+  if (!rel.has_value()) {
     // nothing todo
   } else if (rel.is_path()) {
     ss << " = " << rel.targetPath;
   } else if (rel.is_pathvector()) {
     ss << " = " << rel.targetPathVector;
-  } else if (rel.is_string()) {
-    ss << " = " << quote(rel.targetString);
+  } else if (rel.is_blocked()) {
+    ss << " = None";
   } else {
     ss << "[InternalErrror]";
   }
@@ -300,6 +303,25 @@ std::string print_rel(const Relationship &rel, const std::string &name, uint32_t
   }
 
   ss << "\n";
+
+  return ss.str();
+}
+
+std::string print_relationship(const Relationship &rel, const ListEditQual &qual, const bool custom, const std::string &name, uint32_t indent) {
+  std::stringstream ss;
+
+  ss << pprint::Indent(indent);
+
+  if (custom) {
+    ss << "custom ";
+  }
+
+  // List editing
+  if (qual != ListEditQual::ResetToExplicit) {
+    ss << to_string(qual) << " ";
+  }
+
+  ss << print_rel_only(rel, name, indent);
 
   return ss.str();
 }
@@ -345,8 +367,14 @@ std::string print_prim_metas(const PrimMeta &meta, const uint32_t indent) {
     ss << pprint::Indent(indent) << "kind = " << quote(to_string(meta.kind.value())) << "\n";
   }
 
+  // TODO: UTF-8 ready pprint
   if (meta.sceneName) {
     ss << pprint::Indent(indent) << "sceneName = " << quote(meta.sceneName.value()) << "\n";
+  }
+
+  // TODO: UTF-8 ready pprint
+  if (meta.displayName) {
+    ss << pprint::Indent(indent) << "displayName = " << quote(meta.displayName.value()) << "\n";
   }
 
   if (meta.assetInfo) {
@@ -452,7 +480,7 @@ std::string print_prim_metas(const PrimMeta &meta, const uint32_t indent) {
 
 
   for (const auto &item : meta.meta) {
-    ss << print_meta(item.second, indent+1);
+    ss << print_meta(item.second, indent+1, item.first);
   }
 
   for (const auto &item : meta.stringData) {
@@ -488,8 +516,7 @@ std::string print_attr_metas(const AttrMeta &meta, const uint32_t indent) {
 
   // other user defined metadataum.
   for (const auto &item : meta.meta) {
-    // TODO: emit typename?
-    ss << print_meta(item.second, indent);
+    ss << print_meta(item.second, indent, item.first);
   }
 
   for (const auto &item : meta.stringData) {
@@ -890,7 +917,7 @@ std::string print_rel_prop(const Property &prop, const std::string &name, uint32
   }
 
   const Relationship &rel = prop.get_relationship();
-  ss << print_rel(rel, name, indent);
+  ss << print_rel_only(rel, name, indent);
 
   return ss.str();
 }
@@ -958,7 +985,6 @@ std::string print_prop(const Property &prop, const std::string &prop_name, uint3
   return ss.str();
 }
 
-// Print user-defined (custom) properties.
 std::string print_props(const std::map<std::string, Property> &props, uint32_t indent)
 {
   std::stringstream ss;
@@ -968,6 +994,35 @@ std::string print_props(const std::map<std::string, Property> &props, uint32_t i
     const Property &prop = item.second;
 
     ss << print_prop(prop, item.first, indent);
+
+  }
+
+  return ss.str();
+}
+
+// Print user-defined (custom) properties.
+std::string print_props(const std::map<std::string, Property> &props, std::set<std::string> &tok_table, const std::vector<value::token> &propNames, uint32_t indent)
+{
+  std::stringstream ss;
+
+  if (propNames.size()) {
+    for (size_t i = 0; i < propNames.size(); i++) {
+      if (tok_table.count(propNames[i].str())) {
+        continue;
+      }
+
+      const auto it = props.find(propNames[i].str());
+      if (it != props.end()) {
+
+        ss << print_prop(it->second, it->first, indent);
+
+        tok_table.insert(propNames[i].str());
+      }
+      
+    } 
+  } else {
+
+    ss << print_props(props, indent);
 
   }
 
@@ -1008,6 +1063,9 @@ std::string print_xformOps(const std::vector<XformOp>& xformOps, const uint32_t 
 
   std::stringstream ss;
 
+  // To prevent printing xformOp attributes multiple times.
+  std::set<std::string> printed_vars;
+
   // xforms props
   if (xformOps.size()) {
     for (size_t i = 0; i < xformOps.size(); i++) {
@@ -1018,14 +1076,22 @@ std::string print_xformOps(const std::vector<XformOp>& xformOps, const uint32_t 
         continue;
       }
 
+      std::string varname = to_string(xformOp.op_type);
+      if (!xformOp.suffix.empty()) {
+        varname += ":" + xformOp.suffix;
+      }
+
+      if (printed_vars.count(varname)) {
+        continue;
+      }
+
+      printed_vars.insert(varname);
+
       ss << pprint::Indent(indent);
 
       ss << xformOp.get_value_type_name() << " " ;
 
-      ss << to_string(xformOp.op_type);
-      if (!xformOp.suffix.empty()) {
-        ss << ":" << xformOp.suffix;
-      }
+      ss << varname;
 
       if (xformOp.is_timesamples()) {
         ss << ".timeSamples";
@@ -1070,10 +1136,15 @@ std::string print_gprim_predefined(const T &gprim, const uint32_t indent) {
   ss << print_typed_token_attr(gprim.visibility, "visibility", indent);
 
   if (gprim.materialBinding) {
-    auto m = gprim.materialBinding.value();
-    if (m.binding.is_valid()) {
-      ss << pprint::Indent(indent) << "rel material:binding = " << wquote(to_string(m.binding), "<", ">") << "\n";
-    }
+    ss << print_relationship(gprim.materialBinding.value(), gprim.materialBinding.value().get_listedit_qual(), /* custom */false, "material:binding", indent);
+  }
+
+  if (gprim.materialBindingCorrection) {
+    ss << print_relationship(gprim.materialBindingCorrection.value(), gprim.materialBindingCorrection.value().get_listedit_qual(), /* custom */false, "material:binding:correction", indent);
+  }
+
+  if (gprim.materialBindingPreview) {
+    ss << print_relationship(gprim.materialBindingPreview.value(), gprim.materialBindingPreview.value().get_listedit_qual(), /* custom */false, "material:binding:preview", indent);
   }
 
   ss << print_xformOps(gprim.xformOps, indent);
@@ -1132,7 +1203,7 @@ std::string to_string(const CustomDataType &custom) {
   return print_customData(custom, "", 0);
 }
 
-std::string to_string(const StringData &s) {
+std::string to_string(const value::StringData &s) {
   std::stringstream ss;
   ss << s;
   return ss.str();
@@ -1190,27 +1261,38 @@ std::string print_customData(const CustomDataType &customData, const std::string
     ss << "{\n";
   }
   for (const auto &item : customData) {
-    ss << print_meta(item.second, indent+1);
+    ss << print_meta(item.second, indent+1, item.first);
   }
   ss << pprint::Indent(indent) << "}\n";
 
   return ss.str();
 }
 
-std::string print_meta(const MetaVariable &meta, const uint32_t indent) {
+std::string print_meta(const MetaVariable &meta, const uint32_t indent, const std::string &varname) {
   std::stringstream ss;
 
   //ss << "TODO: isObject " << meta.is_object() << ", isValue " << meta.IsValue() << "\n";
+  
+  // Use varname if meta.name is empty
+  std::string name = meta.get_name();
+  if (name.empty()) {
+    name = varname;
+  }
+
+  if (name.empty()) {
+    name = "[ERROR:EmptyName]";
+  }
+
 
   if (auto pv = meta.get_value<CustomDataType>()) {
     // dict
-    ss << pprint::Indent(indent) << "dictionary " << meta.get_name() << " = {\n";
+    ss << pprint::Indent(indent) << "dictionary " << name << " = {\n";
     for (const auto &item : pv.value()) {
-      ss << print_meta(item.second, indent+1);
+      ss << print_meta(item.second, indent+1, item.first);
     }
     ss << pprint::Indent(indent) << "}\n";
   } else {
-    ss << pprint::Indent(indent) << meta.type_name() << " " << meta.get_name() << " = " << pprint_value(meta.get_raw_value()) << "\n";
+    ss << pprint::Indent(indent) << meta.type_name() << " " << name << " = " << pprint_value(meta.get_raw_value()) << "\n";
   }
 
   return ss.str();
@@ -1557,7 +1639,8 @@ std::string to_string(const Model &model, const uint32_t indent, bool closing_br
   ss << pprint::Indent(indent) << ")\n";
   ss << pprint::Indent(indent) << "{\n";
 
-  ss << print_props(model.props,indent+1);
+  std::set<std::string> tokset;
+  ss << print_props(model.props, tokset, model.propertyNames(), indent+1);
 
   if (closing_brace) {
     ss << pprint::Indent(indent) << "}\n";
@@ -1575,7 +1658,8 @@ std::string to_string(const Scope &scope, const uint32_t indent, bool closing_br
   ss << pprint::Indent(indent) << ")\n";
   ss << pprint::Indent(indent) << "{\n";
 
-  ss << print_props(scope.props, indent+1);
+  std::set<std::string> tokset;
+  ss << print_props(scope.props, tokset, scope.propertyNames(), indent+1);
 
   if (closing_brace) {
     ss << pprint::Indent(indent) << "}\n";
@@ -1703,8 +1787,14 @@ std::string to_string(const GeomMesh &mesh, const uint32_t indent, bool closing_
   ss << print_typed_attr(mesh.faceVertexCounts, "faceVertexCounts", indent+1);
 
   if (mesh.skeleton) {
-    ss << pprint::Indent(indent+1) << "rel skel:skeleton = " << mesh.skeleton.value() << "\n";
+    ss << print_relationship(mesh.skeleton.value(), mesh.skeleton.value().get_listedit_qual(), /* custom */false, "skel:skeketon", indent+1);
   }
+
+  ss << print_typed_attr(mesh.blendShapes, "skel:blendShapes", indent+1);
+  if (mesh.blendShapeTargets) {
+    ss << print_relationship(mesh.blendShapeTargets.value(), mesh.blendShapeTargets.value().get_listedit_qual(), /* custom */false, "skel:blendShapeTargets", indent+1);
+  }
+  
 
   // subdiv
   ss << print_typed_attr(mesh.cornerIndices, "cornerIndices", indent+1);
@@ -2003,7 +2093,7 @@ std::string to_string(const SkelRoot &root, const uint32_t indent, bool closing_
   ss << print_typed_attr(root.extent, "extent", indent+1);
 
   if (root.proxyPrim) {
-    ss << print_rel(root.proxyPrim.value(), "proxyPrim", indent+1);
+    ss << print_relationship(root.proxyPrim.value(), root.proxyPrim.value().get_listedit_qual(), /* custom */false, "proxyPrim", indent+1);
   }
 
   // TODO
@@ -2036,12 +2126,14 @@ std::string to_string(const Skeleton &skel, const uint32_t indent, bool closing_
   ss << print_typed_attr(skel.restTransforms, "restTransforms", indent+1);
 
   if (skel.animationSource) {
-    ss << pprint::Indent(indent+1) << "rel skel:animationSource = " << pquote(skel.animationSource.value()) << "\n";
+    ss << print_relationship(skel.animationSource.value(), skel.animationSource.value().get_listedit_qual(), /* custom */false, "skel:animationSource", indent+1);
   }
 
   if (skel.proxyPrim) {
-    ss << print_rel(skel.proxyPrim.value(), "proxyPrim", indent+1);
+    ss << print_relationship(skel.proxyPrim.value(), skel.proxyPrim.value().get_listedit_qual(), /* custom */false, "proxyPrim", indent+1);
   }
+
+  ss << print_xformOps(skel.xformOps, indent+1);
 
   ss << print_typed_token_attr(skel.visibility, "visibility", indent+1);
   ss << print_typed_token_attr(skel.purpose, "purpose", indent+1);

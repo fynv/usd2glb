@@ -27,6 +27,7 @@ void prim_type_test(void) {
 
   {
     Path path("/dora/bora", "");
+    TEST_CHECK(path.element_name() == "bora"); // leaf name
     auto ret = path.split_at_root();
     TEST_CHECK(std::get<0>(ret).is_valid() == true);
     TEST_CHECK(std::get<0>(ret).full_path_name() == "/dora");
@@ -54,31 +55,30 @@ void prim_type_test(void) {
     TEST_CHECK(c.make_relative(cpath).full_path_name() == "dora"); // std::move
   }
 
-
-#if 0
   {
-    PrimValue<float> pf;
-    TEST_CHECK(pf.array_dim() == 0);
-    TEST_CHECK(pf.type_name() == "float");
+    Path rpath("/dora", "bora");
+    TEST_CHECK(rpath.full_path_name() == "/dora.bora");
+
+    // Allow prop path in prim
+    Path apath("/dora.bora", "");
+    TEST_CHECK(apath.full_path_name() == "/dora.bora");
+    TEST_CHECK(apath.element_name() == "bora");
+
   }
 
   {
-    PrimValue<std::vector<float>> v;
-    TEST_CHECK(v.array_dim() == 1);
-    TEST_CHECK(v.type_name() == "float[]");
-  }
+    Path apath("/dora/bora", "");
+    Path bpath("/dora", "");
+    Path cpath("/doraa", "");
+    Path dpath = bpath.AppendProperty("hello");
+    Path epath = bpath.AppendProperty("hell");
 
-  {
-    PrimValue<std::vector<std::vector<float>>> v;
-    TEST_CHECK(v.array_dim() == 2);
-    TEST_CHECK(v.type_name() == "float[][]");
-  }
+    std::cout << "epath = " << epath.full_path_name() << "\n";
 
-  {
-    PrimValue<std::vector<std::vector<std::vector<float>>>> v;
-    TEST_CHECK(v.array_dim() == 3);
-    TEST_CHECK(v.type_name() == "float[][][]");
+    TEST_CHECK(bpath < apath);
+    TEST_CHECK(bpath < cpath);
+    TEST_CHECK(bpath < dpath);
+    TEST_CHECK(epath < dpath);
   }
-#endif
 
 }

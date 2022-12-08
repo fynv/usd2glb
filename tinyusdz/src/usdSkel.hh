@@ -6,6 +6,7 @@
 
 #include "prim-types.hh"
 #include "value-types.hh"
+#include "xform.hh"
 
 namespace tinyusdz {
 
@@ -15,7 +16,6 @@ constexpr auto kSkelAnimation = "SkelAnimation";
 constexpr auto kBlendShape = "BlendShape";
 
 // BlendShapes
-// TODO(syoyo): Blendshape
 struct BlendShape {
   std::string name;
   Specifier spec{Specifier::Def};
@@ -31,10 +31,19 @@ struct BlendShape {
 
   std::map<std::string, Property> props;
   PrimMeta meta;
+
+  const std::vector<value::token> &primChildrenNames() const { return _primChildren; }
+  const std::vector<value::token> &propertyNames() const { return _properties; }
+  std::vector<value::token> &primChildrenNames() { return _primChildren; }
+  std::vector<value::token> &propertyNames() { return _properties; }
+
+ private:
+  std::vector<value::token> _primChildren;
+  std::vector<value::token> _properties;
 };
 
 // Skeleton
-struct Skeleton {
+struct Skeleton : Xformable {
   std::string name;
   Specifier spec{Specifier::Def};
 
@@ -52,7 +61,7 @@ struct Skeleton {
   nonstd::optional<Relationship> proxyPrim;  // rel proxyPrim
 
   // SkelBindingAPI
-  nonstd::optional<Path>
+  nonstd::optional<Relationship>
       animationSource;  // rel skel:animationSource = </path/...>
 
   TypedAttributeWithFallback<Animatable<Visibility>> visibility{
@@ -64,24 +73,46 @@ struct Skeleton {
       Purpose::Default};  // "uniform token purpose"
 
   std::map<std::string, Property> props;
-  std::vector<value::token> xformOpOrder;
+  //std::vector<value::token> xformOpOrder;
 
   PrimMeta meta;
 
-  bool get_animationSource(Path *path) {
-    if (animationSource) {
-      if (path) {
-        (*path) = animationSource.value();
-        return true;
-      }
+  bool get_animationSource(Path *path, ListEditQual *qual = nullptr) {
+    if (!path) {
+      return false;
     }
+
+    const Relationship &rel = animationSource.value();
+    if (qual) {
+      (*qual) = rel.get_listedit_qual();
+    }
+
+    if (rel.is_path()) {
+      (*path) = rel.targetPath;
+    } else if (rel.is_pathvector()) {
+      if (rel.targetPathVector.size()) {
+        (*path) = rel.targetPathVector[0];
+      }
+    } else {
+      return false;
+    }
+
 
     return false;
   }
+
+  const std::vector<value::token> &primChildrenNames() const { return _primChildren; }
+  const std::vector<value::token> &propertyNames() const { return _properties; }
+  std::vector<value::token> &primChildrenNames() { return _primChildren; }
+  std::vector<value::token> &propertyNames() { return _properties; }
+
+ private:
+  std::vector<value::token> _primChildren;
+  std::vector<value::token> _properties;
 };
 
 // NOTE: SkelRoot itself does not have dedicated attributes in the schema.
-struct SkelRoot {
+struct SkelRoot : Xformable {
   std::string name;
   Specifier spec{Specifier::Def};
   int64_t parent_id{-1};
@@ -95,13 +126,23 @@ struct SkelRoot {
       Visibility::Inherited};  // "token visibility"
 
   nonstd::optional<Relationship> proxyPrim;  // rel proxyPrim
-  std::vector<XformOp> xformOps;
+  //std::vector<XformOp> xformOps;
+
+  // TODO: Add function to check if SkelRoot contains `Skeleton` and `GeomMesh`
+  // node?;
 
   std::map<std::string, Property> props;
   PrimMeta meta;
 
-  // TODO: Add function to check if SkelRoot contains `Skeleton` and `GeomMesh`
-  // node?;
+  const std::vector<value::token> &primChildrenNames() const { return _primChildren; }
+  const std::vector<value::token> &propertyNames() const { return _properties; }
+  std::vector<value::token> &primChildrenNames() { return _primChildren; }
+  std::vector<value::token> &propertyNames() { return _properties; }
+
+ private:
+  std::vector<value::token> _primChildren;
+  std::vector<value::token> _properties;
+
 };
 
 struct SkelAnimation {
@@ -140,28 +181,20 @@ struct SkelAnimation {
 
   std::map<std::string, Property> props;
   PrimMeta meta;
+
+  const std::vector<value::token> &primChildrenNames() const { return _primChildren; }
+  const std::vector<value::token> &propertyNames() const { return _properties; }
+  std::vector<value::token> &primChildrenNames() { return _primChildren; }
+  std::vector<value::token> &propertyNames() { return _properties; }
+
+ private:
+  std::vector<value::token> _primChildren;
+  std::vector<value::token> _properties;
 };
 
 // PackedJointAnimation is deprecated(Convert to SkelAnimation)
 // struct PackedJointAnimation {
 // };
-
-#if 0
-// W.I.P.
-struct SkelBindingAPI {
-  value::matrix4d geomBindTransform;     // primvars:skel:geomBindTransform
-  std::vector<int> jointIndices;         // primvars:skel:jointIndices
-  std::vector<float> jointWeights;       // primvars:skel:jointWeights
-  std::vector<value::token> blendShapes;  // optional?
-  std::vector<value::token> joints;       // optional
-
-  int64_t animationSource{
-      -1};  // index to Scene.animations. ref skel:animationSource
-  int64_t blendShapeTargets{
-      -1};  // index to Scene.blendshapes. ref skel:bindShapeTargets
-  int64_t skeleton{-1};  // index to Scene.skeletons. // ref skel:skeleton
-};
-#endif
 
 // import DEFINE_TYPE_TRAIT and DEFINE_ROLE_TYPE_TRAIT
 #include "define-type-trait.inc"

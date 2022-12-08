@@ -15,6 +15,7 @@
 #include "usdGeom.hh"
 #include "usdShade.hh"
 #include "usdSkel.hh"
+#include "value-types.hh"
 
 namespace tinyusdz {
 namespace tydra {
@@ -67,17 +68,29 @@ const Prim *GetParentPrim(const tinyusdz::Stage &stage,
 ///
 /// Use old-style Callback function approach for easier language bindings
 ///
+/// @param[in] abs_path Prim's absolute path(e.g. "/xform/mesh0")
 /// @param[in] prim Prim
 /// @param[in] tree_depth Tree depth of this Prim. 0 = root prim.
 /// @param[inout] userdata User data.
+/// @param[out] error message.
 ///
-/// @return Usually true. false to notify stop visiting Prims further.
+/// @return Usually true. return false + no error message to notify early
+/// termination of visiting Prims.
 ///
-typedef bool (*VisitPrimFunction)(const Prim &prim, const int32_t tree_depth,
-                                  void *userdata);
+typedef bool (*VisitPrimFunction)(const Path &abs_path, const Prim &prim,
+                                  const int32_t tree_depth, void *userdata,
+                                  std::string *err);
 
-void VisitPrims(const tinyusdz::Stage &stage, VisitPrimFunction visitor_fun,
-                void *userdata = nullptr);
+///
+/// Visit Prims in Stage.
+/// Use `primChildren` metadatum to determine traversal order of Prims if
+/// exists(USDC usually contains `primChildren`) Traversal will be failed when
+/// no Prim found specified in `primChildren`(if exists)
+///
+/// @param[out] err Error message.
+///
+bool VisitPrims(const tinyusdz::Stage &stage, VisitPrimFunction visitor_fun,
+                void *userdata = nullptr, std::string *err = nullptr);
 
 ///
 /// Get Property(Attribute or Relationship) of given Prim by name.
@@ -125,6 +138,8 @@ bool GetAttribute(const tinyusdz::Prim &prim, const std::string &attr_name,
 ///
 bool GetRelationship(const tinyusdz::Prim &prim, const std::string &rel_name,
                      Relationship *rel, std::string *err);
+
+bool HasRelationship(const tinyusdz::Prim &prim, const std::string &rel_name);
 
 ///
 /// Terminal Attribute value at specified timecode.
@@ -247,6 +262,80 @@ bool EvaluateAttribute(
     std::string *err, const double t = tinyusdz::value::TimeCode::Default(),
     const tinyusdz::value::TimeSampleInterpolationType tinterp =
         tinyusdz::value::TimeSampleInterpolationType::Held);
+
+///
+/// For efficient Xform retrieval from Stage.
+///
+/// XformNode's pointer value and hierarchy become invalid when Prim is
+/// removed/added to Stage. If you change the content of Stage, please rebuild
+/// XformNode using BuildXformNodeFromStage() again
+///
+/// TODO: Use prim_id and deprecate the pointer to Prim.
+///
+struct XformNode {
+  std::string element_name;  // e.g. "geom0"
+  Path absolute_path;        // e.g. "/xform/geom0"
+
+  const Prim *prim{nullptr};  // The pointer to Prim.
+  int64_t prim_id{-1};        // Prim id(1 or greater for valid Prim ID)
+
+  XformNode *parent{nullptr};  // pointer to parent
+  std::vector<XformNode> children;
+
+  const value::matrix4d &get_local_matrix() const { return _local_matrix; }
+
+  // world matrix = parent_world_matrix x local_matrix
+  // Equivalent to GetLocalToWorldMatrix in pxrUSD
+  // if !resetXformStack! exists in Prim's xformOpOrder, this returns Prim's local matrix
+  // (clears parent's world matrix)
+  const value::matrix4d &get_world_matrix() const { return _world_matrix; }
+
+  const value::matrix4d &get_parent_world_matrix() const {
+    return _parent_world_matrix;
+  }
+
+  // TODO: accessible only from Friend class?
+  void set_local_matrix(const value::matrix4d &m) { _local_matrix = m; }
+
+  void set_world_matrix(const value::matrix4d &m) { _world_matrix = m; }
+
+  void set_parent_world_matrix(const value::matrix4d &m) {
+    _parent_world_matrix = m;
+  }
+
+  // true: Prim with Xform(e.g. GeomMesh)
+  // false: Prim with no Xform(e.g. Stage root("/"), Scope, Material, ...)
+  bool has_xform() const { return _has_xform; }
+  bool &has_xform() { return _has_xform; }
+
+  bool has_resetXformStack() const { return _has_resetXformStack; }
+  bool &has_resetXformStack() { return _has_resetXformStack; }
+
+ private:
+  bool _has_xform{false};
+  bool _has_resetXformStack{false};  // !resetXformStack! in xformOps
+  value::matrix4d _local_matrix{value::matrix4d::identity()};
+  value::matrix4d _world_matrix{value::matrix4d::identity()};
+  value::matrix4d _parent_world_matrix{value::matrix4d::identity()};
+};
+
+///
+/// Build Xform scene hierachy from Stage.
+///
+/// You can build Xform node graph using BuildXformNodeFromStage()
+///
+/// Set a time, and compute xform of each Prim and store its cache(i.e. read
+/// only).
+///
+/// TODO: Support timeSamples.
+///
+bool BuildXformNodeFromStage(
+    const tinyusdz::Stage &stage, XformNode *root, /* out */
+    const double t = tinyusdz::value::TimeCode::Default(),
+    const tinyusdz::value::TimeSampleInterpolationType tinterp =
+        tinyusdz::value::TimeSampleInterpolationType::Held);
+
+std::string DumpXformNode(const XformNode &root);
 
 //
 // For USDZ AR extensions

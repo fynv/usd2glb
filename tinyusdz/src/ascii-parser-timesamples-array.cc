@@ -125,7 +125,7 @@ extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::quath>
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::quatf> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::quatd> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::token> *result);
-extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<StringData> *result);
+extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<value::StringData> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<std::string> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<Reference> *result);
 extern  template bool AsciiParser::ParseBasicTypeArray(std::vector<Path> *result);
@@ -143,13 +143,13 @@ bool AsciiParser::ParseTimeSampleValueOfArrayType(const uint32_t type_id, value:
 
   if (MaybeNone()) {
     (*result) = value::ValueBlock();
-    return true;     
+    return true;
   }
 
   value::Value val;
 
 #define PARSE_TYPE(__tyid, __type)                       \
-  if (__tyid == value::TypeTraits<__type>::type_id) {             \
+  if (__tyid == value::TypeTraits<__type>::type_id()) {             \
     std::vector<__type> typed_val; \
     if (!ParseBasicTypeArray(&typed_val)) {                             \
       PUSH_ERROR_AND_RETURN("Failed to parse value with requested type `" + value::GetTypeName(__tyid) + "[]`"); \

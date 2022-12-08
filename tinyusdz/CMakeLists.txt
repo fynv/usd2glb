@@ -10,22 +10,60 @@ set(TINYUSDZ_BENCHMARK_TARGET "benchmark_tinyusdz")
 
 project(${TINYUSDZ_TARGET} C CXX)
 
+if (EMSCRIPTEN)
+  set(TINYUSDZ_DEFAULT_PRODUCTION_BUILD On)
+  set(TINYUSDZ_DEFAULT_BUILD_TESTS Off)
+  set(TINYUSDZ_DEFAULT_EXAMPLES Off)
+  set(TINYUSDZ_DEFAULT_WITH_C_API Off)
+  set(TINYUSDZ_DEFAULT_WITH_PXR_COMPAT_API Off)
+  set(TINYUSDZ_DEFAULT_WITH_USDA_PARSER Off)
+  set(TINYUSDZ_DEFAULT_WITH_USDC_PARSER Off)
+else()
+  set(TINYUSDZ_DEFAULT_PRODUCTION_BUILD Off)
+  set(TINYUSDZ_DEFAULT_BUILD_TESTS On)
+  set(TINYUSDZ_DEFAULT_BUILD_EXAMPLES On)
+  set(TINYUSDZ_DEFAULT_WITH_C_API Off)
+  set(TINYUSDZ_DEFAULT_WITH_PXR_COMPAT_API On)
+  set(TINYUSDZ_DEFAULT_WITH_USDA_PARSER On)
+  set(TINYUSDZ_DEFAULT_WITH_USDC_PARSER On)
+endif ()
+
 # options
 option(TINYUSDZ_USE_CCACHE "Use ccache for faster recompile." ON)
 option(TINYUSDZ_BUILD_SHARED_LIBS "Build as dll?" ${BUILD_SHARED_LIBS})
-option(TINYUSDZ_WITH_C_API "Enable C API." ON)
-option(TINYUSDZ_BUILD_TESTS "Build tests" ON)
+option(TINYUSDZ_WITH_C_API "Enable C API." ${TINYUSDZ_DEFAULT_WITH_C_API})
+option(TINYUSDZ_BUILD_TESTS "Build tests" ${TINYUSDZ_DEFAULT_BUILD_TESTS})
 option(TINYUSDZ_BUILD_BENCHMARKS
        "Build some bechmark tests(e.g. internal C++ data structures)" OFF)
 option(TINYUSDZ_BUILD_EXAMPLES
        "Build examples(but not all examples area built in `examples` folder)"
-       ON)
+       ${TINYUSDZ_DEFAULT_BUILD_EXAMPLES})
 
 if(MSVC)
   # it looks it is hard to disable C++ exception for MSVC, so enable exception by default
   set(TINYUSDZ_CXX_EXCEPTIONS_DEFAULT On)
 else()
   set(TINYUSDZ_CXX_EXCEPTIONS_DEFAULT Off)
+endif()
+
+# Enable /MP flags(multi processor build) for Visual Studio
+# Based on VTK's Cmake
+# No need to set this if you use Ninja Generator
+if(MSVC)
+  # default on.
+  # disable MP or reduce cores if you have less memory
+  set(TINYUSDZ_CXX_MP_FLAG ON CACHE BOOL "Build with /MP flag enabled")
+  set(TINYUSDZ_PROCESSOR_COUNT "$ENV{NUMBER_OF_PROCESSORS}")
+  set(TINYUSDZ_CXX_MP_NUM_PROCESSORS ${TINYUSDZ_PROCESSOR_COUNT} CACHE STRING "The maximum number of processes for the /MP flag")
+
+
+  message(STATUS "Use procesors : " ${TINYUSDZ_PROCESSOR_COUNT})
+
+  # /MP flag is set as target_compile_options, so do not add /MP to global CMAKE_CXX_FLAGS variable.
+  #if (CMAKE_CXX_MP_FLAG)
+  #  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP${CMAKE_CXX_MP_NUM_PROCESSORS}")
+  #  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MP${CMAKE_CXX_MP_NUM_PROCESSORS}")
+  #endif ()
 endif()
 
 option(TINYUSDZ_CXX_EXCEPTIONS
@@ -35,6 +73,8 @@ option(TINYUSDZ_CXX_EXCEPTIONS
 option(TINYUSDZ_WITH_JSON "Build with JSON serialization support" OFF)
 option(TINYUSDZ_WITH_USDOBJ "Build with usdObj support(import wavefront .obj)"
        ON)
+option(TINYUSDZ_WITH_USDFBX "Build with usdFbx support(import FBX .fbx)"
+       OFF)
 option(TINYUSDZ_WITH_USDVOX
        "Build with usdVox support(import MagicaVoxel .vox)" ON)
 option(
@@ -54,7 +94,7 @@ option(
   "Prefer locally-installed Python interpreter than system or conda/brew installed Python. Please specify your Python interpreter with `Python3_EXECUTABLE` cmake option"
   OFF)
 
-option(TINYUSDZ_WITH_PXR_COMPAT_API "Build with pxr compatible API" ON)
+option(TINYUSDZ_WITH_PXR_COMPAT_API "Build with pxr compatible API" ${TINYUSDZ_DEFAULT_WITH_PXR_COMPAT_API})
 
 option(
   TINYUSDZ_WITH_BLENDER_ADDON
@@ -64,9 +104,16 @@ option(
 option(TINYUSDZ_USE_SYSTEM_ZLIB
        "Use system's zlib instead of miniz for TinyEXR/TIFF" OFF)
 
+
 option(
   TINYUSDZ_PRODUCTION_BUILD
   "Build for production release(e.g. disables debug print, do not include full filepath in error messages)"
+  OFF)
+
+
+option(
+  TINYUSDZ_DEBUG_PRINT
+  "Enable debug print(For debugging). Disabled when `TINYUSDZ_PRODUCTION_BUILD` is On"
   OFF)
 
 # -- modules --
@@ -109,8 +156,8 @@ option(TINYUSDZ_WITH_COLORIO
 # ---------
 
 # -- optional tool --
-option(TINYUSDZ_WITH_TOOL_USDA_PARSER "Build with USDA parser program" ON)
-option(TINYUSDZ_WITH_TOOL_USDC_PARSER "Build with USDC parser program" ON)
+option(TINYUSDZ_WITH_TOOL_USDA_PARSER "Build with USDA parser program" ${TINYUSDZ_DEFAULT_WITH_USDA_PARSER})
+option(TINYUSDZ_WITH_TOOL_USDC_PARSER "Build with USDC parser program" ${TINYUSDZ_DEFAULT_WITH_USDC_PARSER})
 # --------------
 
 # -- For developers --
@@ -124,6 +171,14 @@ option(TINYUSDZ_CUSTOM_COMPILE_FLAGS
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/sanitizers)
 find_package(Sanitizers) # Address sanitizer (-DSANITIZE_ADDRESS=ON)
+
+# [cifuzz]
+option(TINYUSDZ_TEST_CIFUZZ "Run cifuzz test" OFF)
+
+if (TINYUSDZ_TEST_CIFUZZ)
+  find_package(cifuzz NO_SYSTEM_ENVIRONMENT_PATH)
+  enable_fuzz_testing()
+endif()
 
 if(TINYUSDZ_WITH_EXR OR TINYUSDZ_WITH_TIFF)
   if(TINYUSDZ_USE_SYSTEM_ZLIB)
@@ -271,6 +326,7 @@ set(TINYUSDZ_SOURCES
     ${PROJECT_SOURCE_DIR}/src/image-loader.cc
     ${PROJECT_SOURCE_DIR}/src/pprinter.cc
     ${PROJECT_SOURCE_DIR}/src/stage.cc
+    ${PROJECT_SOURCE_DIR}/src/tydra/prim-apply.cc
     ${PROJECT_SOURCE_DIR}/src/tydra/scene-access.cc
     ${PROJECT_SOURCE_DIR}/src/tydra/shader-network.cc
     ${PROJECT_SOURCE_DIR}/src/tydra/render-data.cc)
@@ -304,6 +360,11 @@ set_source_files_properties(${PROJECT_SOURCE_DIR}/src/external/fpng.cpp
 
 if(TINYUSDZ_WITH_JSON)
   list(APPEND TINYUSDZ_DEP_SOURCES ${PROJECT_SOURCE_DIR}/src/usd-to-json.cc)
+endif()
+
+if(TINYUSDZ_WITH_USDFBX)
+  list(APPEND TINYUSDZ_DEP_SOURCES
+       ${PROJECT_SOURCE_DIR}/src/external/OpenFBX/src/ofbx.cpp)
 endif()
 
 if(TINYUSDZ_WITH_USDOBJ)
@@ -472,6 +533,12 @@ if(TINYUSDZ_WITH_OPENSUBDIV)
     add_library(osd_cpu ${OSD_FAR_SOURCES} ${OSD_OSD_SOURCES})
     target_include_directories(osd_cpu PRIVATE ${osd_DIR})
 
+    if (MSVC)
+      if (TINYUSDZ_CXX_MP_FLAG)
+        target_compile_options(osd_cpu PRIVATE /MP${CMAKE_CXX_MP_NUM_PROCESSORS})
+      endif()
+    endif()
+
   endfunction()
 
   add_osd_lib()
@@ -525,6 +592,17 @@ foreach(TINYUSDZ_LIB_TARGET ${TINYUSDZ_LIBS})
   #  target_compile_options(${TINYUSDZ_LIB_TARGET} PRIVATE /bigobj)
   #endif()
 
+  if (MSVC)
+    if (TINYUSDZ_CXX_MP_FLAG)
+      target_compile_options(${TINYUSDZ_LIB_TARGET} PRIVATE /MP${CMAKE_CXX_MP_NUM_PROCESSORS})
+    endif()
+  endif()
+
+  if(TINYUSDZ_DEBUG_PRINT)
+    target_compile_definitions(${TINYUSDZ_LIB_TARGET}
+                               PRIVATE "TINYUSDZ_DEBUG_PRINT")
+  endif()
+
   if(TINYUSDZ_PRODUCTION_BUILD)
     target_compile_definitions(${TINYUSDZ_LIB_TARGET}
                                PRIVATE "TINYUSDZ_PRODUCTION_BUILD")
@@ -569,6 +647,11 @@ foreach(TINYUSDZ_LIB_TARGET ${TINYUSDZ_LIBS})
   #    ${TINYUSDZ_LIB_TARGET}
   #    PRIVATE ${PROJECT_SOURCE_DIR}/src/external/jsonhpp/)
   #endif()
+
+  if(TINYUSDZ_WITH_USDFBX)
+    target_compile_definitions(${TINYUSDZ_LIB_TARGET}
+                               PRIVATE "TINYUSDZ_USE_USDFBX")
+  endif()
 
   if(TINYUSDZ_WITH_USDOBJ)
     target_compile_definitions(${TINYUSDZ_LIB_TARGET}
@@ -736,7 +819,7 @@ endif()
 
 if(TINYUSDZ_BUILD_EXAMPLES)
   add_subdirectory(examples/simple_usdz_dump)
-  add_subdirectory(examples/tydra_convert)
+  add_subdirectory(examples/tydra_api)
   add_subdirectory(examples/api_tutorial)
   if(TINYUSDZ_WITH_MODULE_USDA_WRITER)
     add_subdirectory(examples/save_usda)

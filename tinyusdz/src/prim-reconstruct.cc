@@ -37,8 +37,12 @@ constexpr auto kTag = "[PrimReconstruct]";
 
 constexpr auto kProxyPrim = "proxyPrim";
 constexpr auto kMaterialBinding = "material:binding";
+constexpr auto kMaterialBindingCorrection = "material:binding:correction";
+constexpr auto kMaterialBindingPreview = "material:binding:preview";
 constexpr auto kSkelSkeleton = "skel:skeleton";
 constexpr auto kSkelAnimationSource = "skel:animationSource";
+constexpr auto kSkelBlendShapes = "skel:blendShapes";
+constexpr auto kSkelBlendShapeTargets = "skel:blendShapeTargets";
 
 ///
 /// TinyUSDZ reconstruct some frequently used shaders(e.g. UsdPreviewSurface)
@@ -143,7 +147,7 @@ nonstd::optional<Animatable<Extent>> ConvertToAnimatable(const primvar::PrimVar 
   } else if (var.is_timesamples()) {
     for (size_t i = 0; i < var.ts_raw().size(); i++) {
       const value::TimeSamples::Sample &s = var.ts_raw().get_samples()[i];
-  
+
       // Attribute Block?
       if (s.blocked) {
         dst.add_blocked_sample(s.t);
@@ -1135,7 +1139,7 @@ static ParseResult ParseShaderOutputProperty(std::set<std::string> &table, /* in
       if (value::TypeTraits<value::token>::type_name() == attr_type_name) {
         if (prop.get_property_type() == Property::Type::EmptyAttrib) {
           Relationship rel;
-          rel.set_empty();
+          rel.set_novalue();
           rel.meta = prop.get_attribute().metas();
           table.insert(name);
           target = rel;
@@ -1233,6 +1237,7 @@ static ParseResult ParseShaderInputConnectionProperty(std::set<std::string> &tab
   return ret;
 }
 
+#if 0
 #define PARSE_PROXY_PRIM_RELATION(__table, __prop, __ptarget) \
   if (prop.first == kProxyPrim) { \
     if (__table.count(kProxyPrim)) { \
@@ -1251,63 +1256,52 @@ static ParseResult ParseShaderInputConnectionProperty(std::set<std::string> &tab
       PUSH_ERROR_AND_RETURN(fmt::format("`{}` target must be Path.", kProxyPrim)); \
     } \
   }
+#endif
 
-// "rel material:binding = <...>"
-#define PARSE_MATERIAL_BINDING_RELATION(__table, __prop, __ptarget) \
-  if (prop.first == kMaterialBinding) { \
-    if (__table.count(kMaterialBinding)) { \
+// Rel with single targetPath
+#define PARSE_SINGLE_TARGET_PATH_RELATION(__table, __prop, __propname, __target) \
+  if (prop.first == __propname) { \
+    if (__table.count(__propname)) { \
        continue; \
     } \
     if (prop.second.is_relationship() && prop.second.is_empty()) { \
-      PUSH_ERROR_AND_RETURN(fmt::format("`{}` must be a Relationship with Path target.", kMaterialBinding)); \
+      PUSH_ERROR_AND_RETURN(fmt::format("`{}` must be a Relationship with Path target.", __propname)); \
     } \
     const Relationship &rel = prop.second.get_relationship(); \
     if (rel.is_path()) { \
-      MaterialBindingAPI m; \
-      m.binding = rel.targetPath; \
-      __ptarget->materialBinding = m; \
+      __target = rel; \
       table.insert(prop.first); \
-      DCOUT("Added rel material:binding."); \
+      DCOUT("Added rel " << __propname); \
       continue; \
     } else if (rel.is_pathvector()) { \
       if (rel.targetPathVector.size() == 1) { \
-        MaterialBindingAPI m; \
-        m.binding = rel.targetPathVector[0]; \
-        __ptarget->materialBinding = m; \
+        __target = rel; \
         table.insert(prop.first); \
-        DCOUT("Added rel material:binding."); \
+        DCOUT("Added rel " << __propname); \
         continue; \
       } \
-      PUSH_ERROR_AND_RETURN(fmt::format("`{}` target is empty or has mutiple Paths. Must be single Path.", kMaterialBinding)); \
+      PUSH_ERROR_AND_RETURN(fmt::format("`{}` target is empty or has mutiple Paths. Must be single Path.", __propname)); \
     } else { \
-      PUSH_ERROR_AND_RETURN(fmt::format("`{}` target must be Path.", kMaterialBinding)); \
+      PUSH_ERROR_AND_RETURN(fmt::format("`{}` target must be Path.", __propname)); \
     } \
   }
 
-#define PARSE_SKEL_SKELETON_RELATION(__table, __prop, __ptarget) \
-  if (prop.first == kSkelSkeleton) { \
-    if (__table.count(kSkelSkeleton)) { \
+// Rel with targetPaths(single path or array of Paths)
+#define PARSE_TARGET_PATHS_RELATION(__table, __prop, __propname, __target) \
+  if (prop.first == __propname) { \
+    if (__table.count(__propname)) { \
        continue; \
     } \
-    if (prop.second.is_relationship() && prop.second.is_empty()) { \
-      PUSH_ERROR_AND_RETURN(fmt::format("`{}` must be a Relationship with Path target.", kSkelSkeleton)); \
+    if (!prop.second.is_relationship()) { \
+      PUSH_ERROR_AND_RETURN(fmt::format("`{}` must be a Relationship", __propname)); \
     } \
     const Relationship &rel = prop.second.get_relationship(); \
-    if (rel.is_path()) { \
-      __ptarget->skeleton = rel.targetPath; \
-      table.insert(prop.first); \
-      continue; \
-    } else if (rel.is_pathvector()) { \
-      if (rel.targetPathVector.size() == 1) { \
-        __ptarget->skeleton = rel.targetPathVector[0]; \
-        table.insert(prop.first); \
-        continue; \
-      } \
-      PUSH_ERROR_AND_RETURN(fmt::format("`{}` target is empty or has mutiple Paths. Must be single Path.", kSkelSkeleton)); \
-    } else { \
-      PUSH_ERROR_AND_RETURN(fmt::format("`{}` target must be Path.", kSkelSkeleton)); \
-    } \
+    __target = rel; \
+    table.insert(prop.first); \
+    DCOUT("Added rel " << __propname); \
+    continue; \
   }
+
 
 #define PARSE_SHADER_TERMINAL_ATTRIBUTE(__table, __prop, __name, __klass, __target) { \
   ParseResult ret = ParseShaderOutputTerminalAttribute(__table, __prop.first, __prop.second, __name, __target); \
@@ -1449,6 +1443,15 @@ static nonstd::expected<Purpose, std::string> PurposeEnumHandler(const std::stri
   return EnumHandler<Purpose>("purpose", tok, enums);
 };
 
+static nonstd::expected<Orientation, std::string> OrientationEnumHandler(const std::string &tok) {
+  using EnumTy = std::pair<Orientation, const char *>;
+  const std::vector<EnumTy> enums = {
+      std::make_pair(Orientation::RightHanded, "rightHanded"),
+      std::make_pair(Orientation::LeftHanded, "leftHanded"),
+  };
+  return EnumHandler<Orientation>("orientation", tok, enums);
+};
+
 #if 0
 // Animatable enum
 template<typename T, typename EnumTy>
@@ -1571,19 +1574,6 @@ nonstd::expected<bool, std::string> ParseEnumProperty(
     }                                                                        \
   } }
 
-
-#if 0 // TODO: remove
-#define PARSE_TYPED_PROPERTY(__table, __prop, __name, __klass, __target) { \
-  ParseResult ret = ParseTypedProperty(__table, __prop.first, __prop.second, __name, __target); \
-  if (ret.code == ParseResult::ResultCode::Success || ret.code == ParseResult::ResultCode::AlreadyProcessed) { \
-    continue; /* got it */\
-  } else if (ret.code == ParseResult::ResultCode::Unmatched) { \
-    /* go next */ \
-  } else { \
-    PUSH_ERROR_AND_RETURN(fmt::format("Parsing property `{}` failed. Error: {}", __name, ret.err)); \
-  } \
-}
-#endif
 
 // Add custom property(including property with "primvars" prefix)
 // Please call this macro after listing up all predefined property using
@@ -1957,9 +1947,45 @@ bool ReconstructXformOpsFromProperties(
   return true;
 }
 
+namespace {
+
+// xformOps and built-in props
+bool ReconstructGPrimProperties(
+  std::set<std::string> &table, /* inout */
+  const std::map<std::string, Property> &properties,
+  GPrim *gprim, /* inout */
+  std::string *warn,
+  std::string *err)
+{
+
+  (void)warn;
+  if (!prim::ReconstructXformOpsFromProperties(table, properties, &gprim->xformOps, err)) {
+    return false;
+  }
+
+  for (const auto &prop : properties) {
+    PARSE_SINGLE_TARGET_PATH_RELATION(table, prop, kMaterialBinding, gprim->materialBinding)
+    PARSE_SINGLE_TARGET_PATH_RELATION(table, prop, kMaterialBindingCorrection, gprim->materialBindingCorrection)
+    PARSE_SINGLE_TARGET_PATH_RELATION(table, prop, kMaterialBindingPreview, gprim->materialBindingPreview)
+    PARSE_SINGLE_TARGET_PATH_RELATION(table, prop, kProxyPrim, gprim->proxyPrim)
+    PARSE_TYPED_ATTRIBUTE(table, prop, "doubleSided", GPrim, gprim->doubleSided)
+    PARSE_ENUM_PROPETY(table, prop, "visibility", VisibilityEnumHandler, GPrim,
+                   gprim->visibility)
+    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GPrim,
+                       gprim->purpose)
+    PARSE_ENUM_PROPETY(table, prop, "orientation", OrientationEnumHandler, GPrim,
+                       gprim->orientation)
+    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", GPrim, gprim->extent)
+  }
+
+  return true;
+}
+
+} // namespace local
+
 
 template <>
-bool ReconstructPrim(
+bool ReconstructPrim<Xform>(
     const PropertyMap &properties,
     const ReferenceList &references,
     Xform *xform,
@@ -1967,21 +1993,9 @@ bool ReconstructPrim(
     std::string *err) {
 
   (void)references;
-  (void)warn;
-
-#if 0 // TODO
-  //
-  // Resolve prepend references
-  //
-  if (std::get<0>(references) == ListEditQual::Prepend) {
-    for (const auto &ref : std::get<1>(references)) {
-      (void)ref;
-    }
-  }
-#endif
 
   std::set<std::string> table;
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &xform->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, xform, warn, err)) {
     return false;
   }
 
@@ -1989,18 +2003,6 @@ bool ReconstructPrim(
     ADD_PROPERTY(table, prop, Xform, xform->props)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
-
-#if 0 // TODO
-  //
-  // Resolve append references
-  // (Overwrite variables with the referenced one).
-  //
-  if (std::get<0>(references) == ListEditQual::Append) {
-    for (const auto &ref : std::get<1>(references)) {
-      (void)ref;
-    }
-  }
-#endif
 
   return true;
 }
@@ -2094,6 +2096,10 @@ bool ReconstructPrim<Skeleton>(
   (void)references;
 
   std::set<std::string> table;
+  if (!prim::ReconstructXformOpsFromProperties(table, properties, &skel->xformOps, err)) {
+    return false;
+  }
+
   for (auto &prop : properties) {
 
     // SkelBindingAPI
@@ -2104,8 +2110,7 @@ bool ReconstructPrim<Skeleton>(
         {
           const Relationship &rel = prop.second.get_relationship();
           if (rel.is_path()) {
-            DCOUT(kSkelAnimationSource);
-            skel->animationSource = rel.targetPath;
+            skel->animationSource = rel;
             table.insert(kSkelAnimationSource);
           } else {
             PUSH_ERROR_AND_RETURN("`" << kSkelAnimationSource << "` target must be Path.");
@@ -2230,6 +2235,7 @@ bool ReconstructPrim<BlendShape>(
   return true;
 }
 
+#if 0
 template <>
 bool ReconstructPrim(
     const PropertyMap &properties,
@@ -2247,6 +2253,7 @@ bool ReconstructPrim(
 
   return true;
 }
+#endif
 
 template <>
 bool ReconstructPrim(
@@ -2295,8 +2302,7 @@ bool ReconstructPrim(
   };
 
   std::set<std::string> table;
-
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &curves->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, curves, warn, err)) {
     return false;
   }
 
@@ -2311,8 +2317,6 @@ bool ReconstructPrim(
     PARSE_TYPED_ATTRIBUTE(table, prop, "accelerations", GeomBasisCurves,
                  curves->accelerations)
     PARSE_TYPED_ATTRIBUTE(table, prop, "widths", GeomBasisCurves, curves->widths)
-    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GeomBasisCurves,
-                       curves->purpose)
     PARSE_ENUM_PROPETY(table, prop, "type", TypeHandler, GeomBasisCurves,
                        curves->type)
     PARSE_ENUM_PROPETY(table, prop, "basis", BasisHandler, GeomBasisCurves,
@@ -2532,98 +2536,16 @@ bool ReconstructPrim<GeomSphere>(
 
   DCOUT("Reconstruct Sphere.");
 
-#if 0 //  TODO
-  //
-  // Resolve prepend references
-  //
-  for (const auto &ref : references) {
-    DCOUT("asset_path = '" + std::get<1>(ref).asset_path + "'\n");
-
-    if ((std::get<0>(ref) == tinyusdz::ListEditQual::ResetToExplicit) ||
-        (std::get<0>(ref) == tinyusdz::ListEditQual::Prepend)) {
-      const Reference &asset_ref = std::get<1>(ref);
-
-      std::string filepath = asset_ref.asset_path;
-      if (!io::IsAbsPath(filepath)) {
-        filepath = io::JoinPath(_base_dir, filepath);
-      }
-
-      if (_reference_cache.count(filepath)) {
-        DCOUT("Got a cache: filepath = " + filepath);
-
-        const auto root_nodes = _reference_cache.at(filepath);
-        const GPrim &prim = std::get<1>(root_nodes)[std::get<0>(root_nodes)];
-
-        for (const auto &prop : prim.props) {
-          (void)prop;
-#if 0
-          if (auto attr = nonstd::get_if<Attribute>(&prop.second)) {
-            if (prop.first == "radius") {
-              if (auto p = value::as_basic<double>(&attr->var)) {
-                SDCOUT << "prepend reference radius = " << (*p) << "\n";
-                sphere->radius = *p;
-              }
-            }
-          }
-#endif
-        }
-      }
-    }
-  }
-#endif
-
   std::set<std::string> table;
-
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &sphere->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, sphere, warn, err)) {
     return false;
   }
 
   for (const auto &prop : properties) {
-    DCOUT("prop: " << prop.first);
-    PARSE_MATERIAL_BINDING_RELATION(table, prop, sphere)
     PARSE_TYPED_ATTRIBUTE(table, prop, "radius", GeomSphere, sphere->radius)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", GeomSphere, sphere->extent)
-    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GeomSphere,
-                       sphere->purpose)
     ADD_PROPERTY(table, prop, GeomSphere, sphere->props)
     PARSE_PROPERTY_END_MAKE_ERROR(table, prop)
   }
-
-#if 0 // TODO
-  //
-  // Resolve append references
-  // (Overwrite variables with the referenced one).
-  //
-  for (const auto &ref : references) {
-    if (std::get<0>(ref) == tinyusdz::ListEditQual::Append) {
-      const Reference &asset_ref = std::get<1>(ref);
-
-      std::string filepath = asset_ref.asset_path;
-      if (!io::IsAbsPath(filepath)) {
-        filepath = io::JoinPath(_base_dir, filepath);
-      }
-
-      if (_reference_cache.count(filepath)) {
-        DCOUT("Got a cache: filepath = " + filepath);
-
-        const auto root_nodes = _reference_cache.at(filepath);
-        const GPrim &prim = std::get<1>(root_nodes)[std::get<0>(root_nodes)];
-
-        for (const auto &prop : prim.props) {
-          (void)prop;
-          // if (auto attr = nonstd::get_if<Attribute>(&prop.second)) {
-          //   if (prop.first == "radius") {
-          //     if (auto p = value::as_basic<double>(&attr->var)) {
-          //       SDCOUT << "append reference radius = " << (*p) << "\n";
-          //       sphere->radius = *p;
-          //     }
-          //   }
-          // }
-        }
-      }
-    }
-  }
-#endif
 
   return true;
 }
@@ -2641,103 +2563,22 @@ bool ReconstructPrim<GeomPoints>(
 
   DCOUT("Reconstruct Points.");
 
-#if 0 //  TODO
-  //
-  // Resolve prepend references
-  //
-  for (const auto &ref : references) {
-    DCOUT("asset_path = '" + std::get<1>(ref).asset_path + "'\n");
-
-    if ((std::get<0>(ref) == tinyusdz::ListEditQual::ResetToExplicit) ||
-        (std::get<0>(ref) == tinyusdz::ListEditQual::Prepend)) {
-      const Reference &asset_ref = std::get<1>(ref);
-
-      std::string filepath = asset_ref.asset_path;
-      if (!io::IsAbsPath(filepath)) {
-        filepath = io::JoinPath(_base_dir, filepath);
-      }
-
-      if (_reference_cache.count(filepath)) {
-        DCOUT("Got a cache: filepath = " + filepath);
-
-        const auto root_nodes = _reference_cache.at(filepath);
-        const GPrim &prim = std::get<1>(root_nodes)[std::get<0>(root_nodes)];
-
-        for (const auto &prop : prim.props) {
-          (void)prop;
-#if 0
-          if (auto attr = nonstd::get_if<Attribute>(&prop.second)) {
-            if (prop.first == "radius") {
-              if (auto p = value::as_basic<double>(&attr->var)) {
-                SDCOUT << "prepend reference radius = " << (*p) << "\n";
-                sphere->radius = *p;
-              }
-            }
-          }
-#endif
-        }
-      }
-    }
-  }
-#endif
-
   std::set<std::string> table;
-
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &points->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, points, warn, err)) {
     return false;
   }
 
   for (const auto &prop : properties) {
     DCOUT("prop: " << prop.first);
-    PARSE_MATERIAL_BINDING_RELATION(table, prop, points)
     PARSE_TYPED_ATTRIBUTE(table, prop, "points", GeomPoints, points->points)
     PARSE_TYPED_ATTRIBUTE(table, prop, "normals", GeomPoints, points->normals)
     PARSE_TYPED_ATTRIBUTE(table, prop, "widths", GeomPoints, points->widths)
     PARSE_TYPED_ATTRIBUTE(table, prop, "ids", GeomPoints, points->ids)
     PARSE_TYPED_ATTRIBUTE(table, prop, "velocities", GeomPoints, points->velocities)
     PARSE_TYPED_ATTRIBUTE(table, prop, "accelerations", GeomPoints, points->accelerations)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", GeomPoints, points->extent)
-    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GeomPoints,
-                       points->purpose)
     ADD_PROPERTY(table, prop, GeomSphere, points->props)
     PARSE_PROPERTY_END_MAKE_ERROR(table, prop)
   }
-
-#if 0 // TODO
-  //
-  // Resolve append references
-  // (Overwrite variables with the referenced one).
-  //
-  for (const auto &ref : references) {
-    if (std::get<0>(ref) == tinyusdz::ListEditQual::Append) {
-      const Reference &asset_ref = std::get<1>(ref);
-
-      std::string filepath = asset_ref.asset_path;
-      if (!io::IsAbsPath(filepath)) {
-        filepath = io::JoinPath(_base_dir, filepath);
-      }
-
-      if (_reference_cache.count(filepath)) {
-        DCOUT("Got a cache: filepath = " + filepath);
-
-        const auto root_nodes = _reference_cache.at(filepath);
-        const GPrim &prim = std::get<1>(root_nodes)[std::get<0>(root_nodes)];
-
-        for (const auto &prop : prim.props) {
-          (void)prop;
-          // if (auto attr = nonstd::get_if<Attribute>(&prop.second)) {
-          //   if (prop.first == "radius") {
-          //     if (auto p = value::as_basic<double>(&attr->var)) {
-          //       SDCOUT << "append reference radius = " << (*p) << "\n";
-          //       sphere->radius = *p;
-          //     }
-          //   }
-          // }
-        }
-      }
-    }
-  }
-#endif
 
   return true;
 }
@@ -2754,21 +2595,15 @@ bool ReconstructPrim<GeomCone>(
   (void)references;
 
   std::set<std::string> table;
-
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &cone->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, cone, warn, err)) {
     return false;
   }
 
   for (const auto &prop : properties) {
     DCOUT("prop: " << prop.first);
-    PARSE_PROXY_PRIM_RELATION(table, prop, cone)
-    PARSE_MATERIAL_BINDING_RELATION(table, prop, cone)
     PARSE_TYPED_ATTRIBUTE(table, prop, "radius", GeomCone, cone->radius)
     PARSE_TYPED_ATTRIBUTE(table, prop, "height", GeomCone, cone->height)
     PARSE_ENUM_PROPETY(table, prop, "axis", AxisEnumHandler, GeomCone, cone->axis)
-    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GeomCone,
-                       cone->purpose)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", GeomCone, cone->extent)
     ADD_PROPERTY(table, prop, GeomCone, cone->props)
     PARSE_PROPERTY_END_MAKE_ERROR(table, prop)
   }
@@ -2787,25 +2622,18 @@ bool ReconstructPrim<GeomCylinder>(
   (void)warn;
   (void)references;
 
-
   std::set<std::string> table;
-
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &cylinder->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, cylinder, warn, err)) {
     return false;
   }
 
   for (const auto &prop : properties) {
     DCOUT("prop: " << prop.first);
-    PARSE_PROXY_PRIM_RELATION(table, prop, cylinder)
-    PARSE_MATERIAL_BINDING_RELATION(table, prop, cylinder)
     PARSE_TYPED_ATTRIBUTE(table, prop, "radius", GeomCylinder,
                          cylinder->radius)
     PARSE_TYPED_ATTRIBUTE(table, prop, "height", GeomCylinder,
                          cylinder->height)
     PARSE_ENUM_PROPETY(table, prop, "axis", AxisEnumHandler, GeomCylinder, cylinder->axis)
-    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GeomCylinder,
-                       cylinder->purpose)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", GeomCylinder, cylinder->extent)
     ADD_PROPERTY(table, prop, GeomCylinder, cylinder->props)
     PARSE_PROPERTY_END_MAKE_ERROR(table, prop)
   }
@@ -2825,21 +2653,14 @@ bool ReconstructPrim<GeomCapsule>(
   (void)references;
 
   std::set<std::string> table;
-
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &capsule->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, capsule, warn, err)) {
     return false;
   }
 
   for (const auto &prop : properties) {
-    DCOUT("prop: " << prop.first);
-    PARSE_PROXY_PRIM_RELATION(table, prop, capsule)
-    PARSE_MATERIAL_BINDING_RELATION(table, prop, capsule)
     PARSE_TYPED_ATTRIBUTE(table, prop, "radius", GeomCapsule, capsule->radius)
     PARSE_TYPED_ATTRIBUTE(table, prop, "height", GeomCapsule, capsule->height)
     PARSE_ENUM_PROPETY(table, prop, "axis", AxisEnumHandler, GeomCapsule, capsule->axis)
-    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GeomCapsule,
-                       capsule->purpose)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", GeomCapsule, capsule->extent)
     ADD_PROPERTY(table, prop, GeomCapsule, capsule->props)
     PARSE_PROPERTY_END_MAKE_ERROR(table, prop)
   }
@@ -2862,19 +2683,13 @@ bool ReconstructPrim<GeomCube>(
   // pxrUSD says... "If you author size you must also author extent."
   //
   std::set<std::string> table;
-
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &cube->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, cube, warn, err)) {
     return false;
   }
 
   for (const auto &prop : properties) {
     DCOUT("prop: " << prop.first);
-    PARSE_PROXY_PRIM_RELATION(table, prop, cube)
-    PARSE_MATERIAL_BINDING_RELATION(table, prop, cube)
     PARSE_TYPED_ATTRIBUTE(table, prop, "size", GeomCube, cube->size)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", GeomCube, cube->extent)
-    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GeomCube,
-                       cube->purpose)
     ADD_PROPERTY(table, prop, GeomCube, cube->props)
     PARSE_PROPERTY_END_MAKE_ERROR(table, prop)
   }
@@ -2893,78 +2708,6 @@ bool ReconstructPrim<GeomMesh>(
   (void)references;
 
   DCOUT("GeomMesh");
-
-#if 0 // TODO
-  //
-  // Resolve prepend references
-  //
-
-  for (const auto &ref : references) {
-    DCOUT("asset_path = '" + std::get<1>(ref).asset_path + "'\n");
-
-    if ((std::get<0>(ref) == tinyusdz::ListEditQual::ResetToExplicit) ||
-        (std::get<0>(ref) == tinyusdz::ListEditQual::Prepend)) {
-      const Reference &asset_ref = std::get<1>(ref);
-
-      if (endsWith(asset_ref.asset_path, ".obj")) {
-        std::string err;
-        GPrim gprim;
-
-        // abs path.
-        std::string filepath = asset_ref.asset_path;
-
-        if (io::IsAbsPath(asset_ref.asset_path)) {
-          // do nothing
-        } else {
-          if (!_base_dir.empty()) {
-            filepath = io::JoinPath(_base_dir, filepath);
-          }
-        }
-
-        DCOUT("Reading .obj file: " + filepath);
-
-        if (!usdObj::ReadObjFromFile(filepath, &gprim, &err)) {
-          PUSH_ERROR_AND_RETURN("Failed to read .obj(usdObj). err = " + err);
-        }
-        DCOUT("Loaded .obj file: " + filepath);
-
-        mesh->visibility = gprim.visibility;
-        mesh->doubleSided = gprim.doubleSided;
-        mesh->orientation = gprim.orientation;
-
-        if (gprim.props.count("points")) {
-          DCOUT("points");
-          const Property &prop = gprim.props.at("points");
-          if (prop.is_relationship()) {
-            PUSH_WARN("TODO: points Rel\n");
-          } else {
-            const Attribute &attr = prop.attrib;
-            // PrimVar
-            DCOUT("points.type:" + attr.var.type_name());
-            if (attr.var.is_scalar()) {
-              auto p = attr.var.get_value<std::vector<value::point3f>>();
-              if (p) {
-                mesh->points.value = p.value();
-              } else {
-                PUSH_ERROR_AND_RETURN("TODO: points.type = " +
-                                      attr.var.type_name());
-              }
-              // if (auto p = value::as_vector<value::float3>(&pattr->var)) {
-              //   DCOUT("points. sz = " + std::to_string(p->size()));
-              //   mesh->points = (*p);
-              // }
-            } else {
-              PUSH_ERROR_AND_RETURN("TODO: timesample points.");
-            }
-          }
-        }
-
-      } else {
-        DCOUT("Not a .obj file");
-      }
-    }
-  }
-#endif
 
   auto SubdivisioSchemeHandler = [](const std::string &tok)
       -> nonstd::expected<GeomMesh::SubdivisionScheme, std::string> {
@@ -3015,16 +2758,14 @@ bool ReconstructPrim<GeomMesh>(
   };
 
   std::set<std::string> table;
-
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &mesh->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, mesh, warn, err)) {
     return false;
   }
 
   for (const auto &prop : properties) {
     DCOUT("GeomMesh prop: " << prop.first);
-    PARSE_PROXY_PRIM_RELATION(table, prop, mesh)
-    PARSE_MATERIAL_BINDING_RELATION(table, prop, mesh)
-    PARSE_SKEL_SKELETON_RELATION(table, prop, mesh)
+    PARSE_SINGLE_TARGET_PATH_RELATION(table, prop, kSkelSkeleton, mesh->skeleton)
+    PARSE_TARGET_PATHS_RELATION(table, prop, kSkelBlendShapeTargets, mesh->blendShapeTargets)
     PARSE_TYPED_ATTRIBUTE(table, prop, "points", GeomMesh, mesh->points)
     PARSE_TYPED_ATTRIBUTE(table, prop, "normals", GeomMesh, mesh->normals)
     PARSE_TYPED_ATTRIBUTE(table, prop, "faceVertexCounts", GeomMesh,
@@ -3044,9 +2785,6 @@ bool ReconstructPrim<GeomMesh>(
                          mesh->cornerIndices)
     PARSE_TYPED_ATTRIBUTE(table, prop, "holeIndices", GeomMesh,
                          mesh->cornerIndices)
-    //
-    PARSE_TYPED_ATTRIBUTE(table, prop, "doubleSided", GeomMesh, mesh->doubleSided)
-
     PARSE_ENUM_PROPETY(table, prop, "subdivisionScheme",
                        SubdivisioSchemeHandler, GeomMesh,
                        mesh->subdivisionScheme)
@@ -3056,24 +2794,13 @@ bool ReconstructPrim<GeomMesh>(
     PARSE_ENUM_PROPETY(table, prop, "facevaryingLinearInterpolation",
                        FaceVaryingLinearInterpolationHandler, GeomMesh,
                        mesh->faceVaryingLinearInterpolation)
-    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GeomMesh,
-                       mesh->purpose)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", GeomMesh, mesh->extent)
+    // blendShape names
+    PARSE_TYPED_ATTRIBUTE(table, prop, kSkelBlendShapes, GeomMesh, mesh->blendShapes)
+    // generic
     ADD_PROPERTY(table, prop, GeomMesh, mesh->props)
     PARSE_PROPERTY_END_MAKE_WARN(table, prop)
   }
 
-#if 0
-  //
-  // Resolve append references
-  // (Overwrite variables with the referenced one).
-  //
-  for (const auto &ref : references) {
-    if (std::get<0>(ref) == tinyusdz::ListEditQual::Append) {
-      // TODO
-    }
-  }
-#endif
 
   return true;
 }
@@ -3142,8 +2869,7 @@ bool ReconstructPrim<GeomCamera>(
   };
 
   std::set<std::string> table;
-
-  if (!prim::ReconstructXformOpsFromProperties(table, properties, &camera->xformOps, err)) {
+  if (!ReconstructGPrimProperties(table, properties, camera, warn, err)) {
     return false;
   }
 
@@ -3168,9 +2894,6 @@ bool ReconstructPrim<GeomCamera>(
                        camera->projection)
     PARSE_ENUM_PROPETY(table, prop, "stereoRole", StereoRoleHandler, GeomCamera,
                        camera->stereoRole)
-    PARSE_ENUM_PROPETY(table, prop, "purpose", PurposeEnumHandler, GeomCamera,
-                         camera->purpose)
-    PARSE_EXTENT_ATTRIBUTE(table, prop, "extent", GeomCamera, camera->extent)
     ADD_PROPERTY(table, prop, GeomCamera, camera->props)
     PARSE_PROPERTY_END_MAKE_ERROR(table, prop)
   }

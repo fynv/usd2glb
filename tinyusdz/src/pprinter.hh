@@ -59,9 +59,9 @@ std::string to_string(const std::vector<Path> &v, bool show_full_path = true);
 // For debugging
 std::string dump_path(const Path &p);
 
-std::string to_string(const StringData &s);
 
 // TODO: move to value-types.hh
+std::string to_string(const value::StringData &s);
 std::string to_string(const value::token &s);
 std::string to_string(const std::string &s);
 
@@ -179,15 +179,26 @@ std::string to_string(const CustomDataType &customData);
 std::string print_xformOpOrder(const std::vector<XformOp> &xformOps, const uint32_t indent);
 std::string print_xformOps(const std::vector<XformOp>& xformOps, const uint32_t indent);
 std::string print_attr_metas(const AttrMeta &meta, const uint32_t indent);
-std::string print_meta(const MetaVariable &meta, const uint32_t indent);
+
+// varname = optional variable name which is used when meta.get_name() is empty.
+std::string print_meta(const MetaVariable &meta, const uint32_t indent, const std::string &varname = std::string());
 std::string print_prim_metas(const PrimMeta &meta, const uint32_t indent);
 std::string print_customData(const CustomDataType &customData, const std::string &name, const uint32_t indent);
 std::string print_variantSelectionMap(const VariantSelectionMap &map, const uint32_t indent);
 std::string print_payload(const prim::PayloadList &payload, const uint32_t indent);
 std::string print_timesamples(const value::TimeSamples &v, const uint32_t indent);
 std::string print_rel_prop(const Property &prop, const std::string &name, uint32_t indent);
+
 std::string print_prop(const Property &prop, const std::string &prop_name, uint32_t indent);
+
+// Print properties.
+// TODO: Deprecate this function.
 std::string print_props(const std::map<std::string, Property> &props, uint32_t indent);
+
+// tok_table: Manages property is already printed(built-in props) or not.
+// propNames: Specify the order of property to print
+// When `propNames` is empty, print all of items in `props`.
+std::string print_props(const std::map<std::string, Property> &props, /* input */ std::set<std::string> &tok_table, const std::vector<value::token> &propNames, uint32_t indent);
 
 
 // Forwad decl

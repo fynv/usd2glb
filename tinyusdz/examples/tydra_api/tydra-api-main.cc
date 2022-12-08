@@ -5,10 +5,12 @@
 #include "tinyusdz.hh"
 #include "tydra/render-data.hh"
 #include "tydra/scene-access.hh"
+#include "tydra/shader-network.hh"
 #include "usdShade.hh"
 #include "pprinter.hh"
 #include "prim-pprint.hh"
 #include "value-pprint.hh"
+#include "value-types.hh"
 
 static std::string GetFileExtension(const std::string &filename) {
   if (filename.find_last_of('.') != std::string::npos)
@@ -203,16 +205,19 @@ int main(int argc, char **argv) {
             << "\n";
 
   // Visit all Prims in the Stage.
-  auto prim_visit_fun = [](const tinyusdz::Prim &prim, const int32_t level, void *userdata) -> bool {
-    std::cout << tinyusdz::pprint::Indent(level) << "[" << level << "] (" << prim.data().type_name() << ") " << prim.local_path().prim_part() << "\n";
+  auto prim_visit_fun = [](const tinyusdz::Path &abs_path, const tinyusdz::Prim &prim, const int32_t level, void *userdata, std::string *err) -> bool {
+    (void)err;
+    std::cout << tinyusdz::pprint::Indent(level) << "[" << level << "] (" << prim.data().type_name() << ") " << prim.local_path().prim_part() << " : AbsPath " << tinyusdz::to_string(abs_path) << "\n";
 
     // Use as() or is() for Prim specific processing.
     if (const tinyusdz::Material *pm = prim.as<tinyusdz::Material>()) {
       (void)pm;
       std::cout << tinyusdz::pprint::Indent(level) << "  Got Material!\n";
+      // return false + `err` empty if you want to terminate traversal earlier.
+      //return false;
     }
 
-    return true; // return false if you want to terminate traversal earlier.
+    return true; 
   };
 
   void *userdata = nullptr;
@@ -222,6 +227,20 @@ int main(int argc, char **argv) {
 
   std::cout << "--------------------------------------"
             << "\n";
+
+  // Compute Xform of each Prim at time t.
+  {
+    tinyusdz::tydra::XformNode xformnode;
+    double t = tinyusdz::value::TimeCode::Default();
+    tinyusdz::value::TimeSampleInterpolationType tinterp = tinyusdz::value::TimeSampleInterpolationType::Held; // Held or Linear
+
+    if (!tinyusdz::tydra::BuildXformNodeFromStage(stage, &xformnode, t, tinterp)) {
+      std::cerr << "BuildXformNodeFromStage error.\n";
+    } else {
+      std::cout << tinyusdz::tydra::DumpXformNode(xformnode) << "\n";
+    }
+  }
+
 
   // Mapping hold the pointer to concrete Prim object,
   // So stage content should not be changed(no Prim addition/deletion).
@@ -337,11 +356,35 @@ int main(int argc, char **argv) {
     }
   }
 
-  std::cout << "EvaluateAttribute example -------------\n";
+
+  //
+  // Find bound Material
+  //
+  std::cout << "FindBoundMaterial example -------------\n";
+  for (const auto &item : meshmap) {
+    // FindBoundMaterial seaches bound material for parent GPrim.
+    tinyusdz::Path matPath;
+    const tinyusdz::Material *material{nullptr};
+    std::string err;
+    bool ret = tinyusdz::tydra::FindBoundMaterial(stage, tinyusdz::Path(item.first, ""), /* suffix */"", &matPath, &material, &err);
+
+    if (ret) {
+      std::cout << item.first << " has bound Material. Material Path = " << matPath << "\n";
+      std::cout << "mat = " << material << "\n";
+      if (material) {
+        std::cout << to_string(*material, /* indent */1) << "\n";
+      }
+    } else {
+      std::cout << "Bound material not found for Prim path : " << item.first << "\n";
+    }
+  }
+
+
 
   //
   // Shader attribute evaluation example.
   //
+  std::cout << "EvaluateAttribute example -------------\n";
   for (const auto &item : preadermap) {
     // Returned Prim is Shader class
     nonstd::expected<const tinyusdz::Prim*, std::string> shader = stage.GetPrimAtPath(tinyusdz::Path(item.first, /* prop name */""));
@@ -373,6 +416,7 @@ int main(int argc, char **argv) {
       std::cerr << "Err: " << shader.error() << "\n";
     }
   }
+
 
 
   return 0;

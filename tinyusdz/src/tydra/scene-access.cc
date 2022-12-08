@@ -9,6 +9,7 @@
 #include "prim-types.hh"
 #include "primvar.hh"
 #include "tiny-format.hh"
+#include "tydra/prim-apply.hh"
 #include "usdGeom.hh"
 #include "usdLux.hh"
 #include "usdShade.hh"
@@ -144,13 +145,13 @@ template <typename T>
 bool ListPrims(const tinyusdz::Stage &stage, PathPrimMap<T> &m /* output */) {
   // Should report error at compilation stege.
   static_assert(
-      (value::TypeId::TYPE_ID_MODEL_BEGIN <= value::TypeTraits<T>::type_id) &&
-          (value::TypeId::TYPE_ID_MODEL_END > value::TypeTraits<T>::type_id),
+      (value::TypeId::TYPE_ID_MODEL_BEGIN <= value::TypeTraits<T>::type_id()) &&
+          (value::TypeId::TYPE_ID_MODEL_END > value::TypeTraits<T>::type_id()),
       "Not a Prim type.");
 
   // Check at runtime. Just in case...
-  if ((value::TypeId::TYPE_ID_MODEL_BEGIN <= value::TypeTraits<T>::type_id) &&
-      (value::TypeId::TYPE_ID_MODEL_END > value::TypeTraits<T>::type_id)) {
+  if ((value::TypeId::TYPE_ID_MODEL_BEGIN <= value::TypeTraits<T>::type_id()) &&
+      (value::TypeId::TYPE_ID_MODEL_END > value::TypeTraits<T>::type_id())) {
     // Ok
   } else {
     return false;
@@ -169,13 +170,13 @@ bool ListShaders(const tinyusdz::Stage &stage,
   // Concrete Shader type(e.g. UsdPreviewSurface) is classified as Imaging
   // Should report error at compilation stege.
   static_assert(
-      (value::TypeId::TYPE_ID_IMAGING_BEGIN <= value::TypeTraits<T>::type_id) &&
-          (value::TypeId::TYPE_ID_IMAGING_END > value::TypeTraits<T>::type_id),
+      (value::TypeId::TYPE_ID_IMAGING_BEGIN <= value::TypeTraits<T>::type_id()) &&
+          (value::TypeId::TYPE_ID_IMAGING_END > value::TypeTraits<T>::type_id()),
       "Not a Shader type.");
 
   // Check at runtime. Just in case...
-  if ((value::TypeId::TYPE_ID_IMAGING_BEGIN <= value::TypeTraits<T>::type_id) &&
-      (value::TypeId::TYPE_ID_IMAGING_END > value::TypeTraits<T>::type_id)) {
+  if ((value::TypeId::TYPE_ID_IMAGING_BEGIN <= value::TypeTraits<T>::type_id()) &&
+      (value::TypeId::TYPE_ID_IMAGING_END > value::TypeTraits<T>::type_id())) {
     // Ok
   } else {
     return false;
@@ -305,17 +306,54 @@ template bool ListShaders(const tinyusdz::Stage &stage,
 
 namespace {
 
-bool VisitPrimsRec(const tinyusdz::Prim &root, int32_t level,
-                   VisitPrimFunction visitor_fun, void *userdata) {
-  bool ret = visitor_fun(root, level, userdata);
+bool VisitPrimsRec(const tinyusdz::Path &root_abs_path, const tinyusdz::Prim &root, int32_t level,
+                   VisitPrimFunction visitor_fun, void *userdata, std::string *err) {
+
+  std::string fun_error;
+  bool ret = visitor_fun(root_abs_path, root, level, userdata, &fun_error);
   if (!ret) {
+    if (fun_error.empty()) {
+      // early termination request.
+    } else {
+      if (err) {
+        (*err) += fmt::format("Visit function returned an error for Prim {} (id {})", root_abs_path.full_path_name(), root.prim_id());
+      }
+    }
     return false;
   }
 
-  for (const auto &child : root.children()) {
-    if (!VisitPrimsRec(child, level + 1, visitor_fun, userdata)) {
-      return false;
+  // if `primChildren` is available, use it
+  if (root.metas().primChildren.size() == root.children().size()) {
+    std::map<std::string, const Prim *> primNameTable;
+    for (size_t i = 0; i < root.children().size(); i++) {
+      primNameTable.emplace(root.children()[i].element_name(), &root.children()[i]);
     }
+
+    for (size_t i = 0; i < root.metas().primChildren.size(); i++) {
+      value::token nameTok = root.metas().primChildren[i];
+      const auto it = primNameTable.find(nameTok.str());
+      if (it != primNameTable.end()) {
+        const Path child_abs_path = root_abs_path.AppendPrim(nameTok.str());
+        if (!VisitPrimsRec(child_abs_path, *it->second, level + 1, visitor_fun, userdata, err)) {
+          return false;
+        }
+      } else {
+        if (err) {
+          (*err) += fmt::format("Prim name `{}` in `primChildren` metadatum not found in this Prim's children", nameTok.str()); 
+        }
+        return false;
+      }
+    }
+
+  } else {
+
+    for (const auto &child : root.children()) {
+      const Path child_abs_path = root_abs_path.AppendPrim(child.element_name());
+      if (!VisitPrimsRec(child_abs_path, child, level + 1, visitor_fun, userdata, err)) {
+        return false;
+      }
+    }
+
   }
 
   return true;
@@ -869,8 +907,7 @@ nonstd::expected<bool, std::string> GetPrimProperty(
     ToTokenProperty(mesh.faceVaryingLinearInterpolation, *out_prop);
   } else if (prop_name == "skeleton") {
     if (mesh.skeleton) {
-      Relationship rel;
-      rel.set(mesh.skeleton.value());
+      const Relationship &rel = mesh.skeleton.value();
       (*out_prop) = Property(rel, /* custom */ false);
     } else {
       // empty
@@ -1071,7 +1108,7 @@ nonstd::expected<bool, std::string> GetPrimProperty(
   } else if (prop_name == "outputsSurface") {
     if (surface.outputsSurface) {
       const Relationship &rel = surface.outputsSurface.value();
-      if (rel.is_empty()) {
+      if (!rel.has_value()) {
         // empty. type info only
         (*out_prop) = Property(value::kToken, /* custom */ false);
       } else if (rel.is_path()) {
@@ -1090,7 +1127,7 @@ nonstd::expected<bool, std::string> GetPrimProperty(
   } else if (prop_name == "outputsDisplacement") {
     if (surface.outputsDisplacement) {
       const Relationship &rel = surface.outputsDisplacement.value();
-      if (rel.is_empty()) {
+      if (!rel.has_value()) {
         // empty. type info only
         (*out_prop) = Property(value::kToken, /* custom */ false);
       } else if (rel.is_path()) {
@@ -1248,8 +1285,7 @@ nonstd::expected<bool, std::string> GetPrimProperty(
     ToProperty(skel.restTransforms, (*out_prop));
   } else if (prop_name == "animationSource") {
     if (skel.animationSource) {
-      Relationship rel;
-      rel.set(skel.animationSource.value());
+      const Relationship &rel = skel.animationSource.value();
       (*out_prop) = Property(rel, /* custom */ false);
     } else {
       // empty
@@ -1417,13 +1453,42 @@ bool EvaluateAttributeImpl(
 
 }  // namespace
 
-void VisitPrims(const tinyusdz::Stage &stage, VisitPrimFunction visitor_fun,
-                void *userdata) {
-  for (const auto &root : stage.root_prims()) {
-    if (!VisitPrimsRec(root, /* root level */ 0, visitor_fun, userdata)) {
-      return;
+bool VisitPrims(const tinyusdz::Stage &stage, VisitPrimFunction visitor_fun,
+                void *userdata, std::string *err) {
+
+  // if `primChildren` is available, use it
+  if (stage.metas().primChildren.size() == stage.root_prims().size()) {
+    std::map<std::string, const Prim *> primNameTable;
+    for (size_t i = 0; i < stage.root_prims().size(); i++) {
+      primNameTable.emplace(stage.root_prims()[i].element_name(), &stage.root_prims()[i]);
+    }
+
+    for (size_t i = 0; i < stage.metas().primChildren.size(); i++) {
+      value::token nameTok = stage.metas().primChildren[i];
+      const auto it = primNameTable.find(nameTok.str());
+      if (it != primNameTable.end()) {
+        const Path root_abs_path("/" + nameTok.str(), "");
+        if (!VisitPrimsRec(root_abs_path, *it->second, 0, visitor_fun, userdata, err)) {
+          return false;
+        }
+      } else {
+        if (err) {
+          (*err) += fmt::format("Prim name `{}` in root Layer's `primChildren` metadatum not found in Layer root.", nameTok.str()); 
+        }
+        return false;
+      }
+    }
+
+  } else {
+    for (const auto &root : stage.root_prims()) {
+      const Path root_abs_path("/" + root.element_name(), /* prop part */"");
+      if (!VisitPrimsRec(root_abs_path, root, /* root level */ 0, visitor_fun, userdata, err)) {
+        return false;
+      }
     }
   }
+
+  return true;
 }
 
 bool GetProperty(const tinyusdz::Prim &prim, const std::string &attr_name,
@@ -1537,6 +1602,153 @@ bool ListSceneNames(const tinyusdz::Prim &root,
   }
 
   return true;
+}
+
+namespace {
+
+bool BuildXformNodeFromStageRec(
+  const tinyusdz::Stage &stage,
+  const Path &parent_abs_path,
+  const Prim *prim,
+  XformNode *nodeOut, /* out */
+  value::matrix4d rootMat,
+  const double t, const tinyusdz::value::TimeSampleInterpolationType tinterp) {
+  // TODO: time
+  (void)t;
+  (void)tinterp;
+  (void)stage;
+
+  if (!nodeOut) {
+    return false;
+  }
+
+  XformNode node;
+
+  if (prim->element_name().empty()) {
+    // TODO: report error
+  }
+
+  node.element_name = prim->element_name();
+  node.absolute_path = parent_abs_path.AppendPrim(prim->element_name());
+  node.prim_id = prim->prim_id();
+  node.prim = prim; // Assume Prim's address does not change.
+
+  DCOUT(prim->element_name() << ": IsXformablePrim" << IsXformablePrim(*prim));
+
+  if (IsXformablePrim(*prim)) {
+    bool resetXformStack{false};
+
+    // TODO: t, tinterp
+    value::matrix4d localMat = GetLocalTransform(*prim, &resetXformStack);
+    DCOUT("local mat = " << localMat);
+
+    value::matrix4d worldMat = rootMat;
+    node.has_resetXformStack() = resetXformStack;
+
+    value::matrix4d m;
+
+    if (resetXformStack) {
+      // Ignore parent Xform.
+      m = localMat;
+    } else {
+      // matrix is row-major, so local first
+      m = localMat * worldMat;
+    }
+
+    node.set_parent_world_matrix(rootMat);
+    node.set_local_matrix(localMat);
+    node.set_world_matrix(m);
+    node.has_xform() = true;
+  } else {
+    DCOUT("Not xformable");
+    node.has_xform() = false;
+    node.has_resetXformStack() = false;
+    node.set_parent_world_matrix(rootMat);
+    node.set_world_matrix(rootMat);
+    node.set_local_matrix(value::matrix4d::identity());
+  }
+
+  for (const auto &childPrim : prim->children()) {
+    XformNode childNode;
+    if (!BuildXformNodeFromStageRec(stage, node.absolute_path, &childPrim, &childNode, node.get_world_matrix(), t, tinterp)) {
+      return false;
+    }
+
+    childNode.parent = &node;
+    node.children.emplace_back(std::move(childNode));
+  }
+
+  (*nodeOut) = node;
+
+
+  return true;
+}
+
+std::string DumpXformNodeRec(
+  const XformNode &node,
+  uint32_t indent)
+{
+  std::stringstream ss;
+
+  ss << pprint::Indent(indent) << "Prim name: " << node.element_name << " PrimID: " << node.prim_id << " (Path " << node.absolute_path << ") Xformable? " << node.has_xform() << " resetXformStack? " << node.has_resetXformStack() << " {\n";
+  ss << pprint::Indent(indent+1) << "parent_world: " << node.get_parent_world_matrix() << "\n";
+  ss << pprint::Indent(indent+1) << "world: " << node.get_world_matrix() << "\n";
+  ss << pprint::Indent(indent+1) << "local: " << node.get_local_matrix() << "\n";
+
+  for (const auto &child : node.children) {
+    ss << DumpXformNodeRec(child, indent+1);
+  }
+  ss << pprint::Indent(indent+1) << "}\n";
+
+  return ss.str();
+}
+
+
+} // namespace local
+
+bool BuildXformNodeFromStage(
+  const tinyusdz::Stage &stage,
+  XformNode *rootNode, /* out */
+  const double t, const tinyusdz::value::TimeSampleInterpolationType tinterp) {
+
+  if (!rootNode) {
+    return false;
+  }
+
+  XformNode stage_root;
+  stage_root.element_name = ""; // Stage root element name is empty.
+  stage_root.absolute_path = Path("/", "");
+  stage_root.has_xform() = false;
+  stage_root.parent = nullptr;
+  stage_root.prim = nullptr; // No prim for stage root.
+  stage_root.prim_id = -1;
+  stage_root.has_resetXformStack() = false;
+  stage_root.set_parent_world_matrix(value::matrix4d::identity());
+  stage_root.set_world_matrix(value::matrix4d::identity());
+  stage_root.set_local_matrix(value::matrix4d::identity());
+
+  for (const auto &root : stage.root_prims()) {
+    XformNode node;
+
+    value::matrix4d rootMat{value::matrix4d::identity()};
+
+    if (!BuildXformNodeFromStageRec(stage, stage_root.absolute_path, &root, &node, rootMat, t, tinterp)) {
+      return false;
+    }
+
+    stage_root.children.emplace_back(std::move(node));
+  }
+
+  (*rootNode) = stage_root;
+
+  return true;
+}
+
+std::string DumpXformNode(
+  const XformNode &node)
+{
+  return DumpXformNodeRec(node, 0);
+
 }
 
 }  // namespace tydra
